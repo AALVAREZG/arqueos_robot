@@ -1,0 +1,26 @@
+[run]
+# Coverage configuration
+source = .
+omit =
+    */tests/*
+    */test_*
+    */__pycache__/*
+    */venv/*
+    */output/*
+    */.rpa/*
+    */setup.py
+    */main.py
+
+[report]
+# Reporting configuration
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+
+[html]
+directory = htmlcov
