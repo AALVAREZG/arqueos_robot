@@ -15,3 +15,20 @@ temp/
 testrun/*
 .~lock*
 *.pkl
+
+# Environment variables
+.env
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+.hypothesis/
+*.log
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
