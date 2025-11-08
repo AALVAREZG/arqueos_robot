@@ -3,6 +3,7 @@ Pytest configuration and shared fixtures for testing.
 """
 
 import pytest
+import pika
 from datetime import datetime
 from typing import Dict, Any
 from unittest.mock import Mock, MagicMock
@@ -99,9 +100,13 @@ def mock_rabbitmq_connection(mocker):
     mock_connection.channel.return_value = mock_channel
     mock_connection.is_closed = False
 
-    # Mock pika.BlockingConnection
+    # Mock pika.BlockingConnection to return our mock
     mocker.patch('pika.BlockingConnection', return_value=mock_connection)
-    mocker.patch('pika.PlainCredentials')
+
+    # Create a real PlainCredentials object instead of mocking it
+    # Pika does strict type checking and rejects mocks
+    real_credentials = pika.PlainCredentials('test_user', 'test_pass')
+    mocker.patch('pika.PlainCredentials', return_value=real_credentials)
 
     return {
         'connection': mock_connection,
