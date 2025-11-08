@@ -52,7 +52,11 @@ class TestSetupConnection:
             'pika.BlockingConnection',
             return_value=mock_connection
         )
-        mock_credentials = mocker.patch('pika.PlainCredentials')
+
+        # Create a real PlainCredentials object instead of mock
+        # Pika does strict type checking and rejects mocks
+        real_credentials = pika.PlainCredentials('test_user', 'test_pass')
+        mock_credentials = mocker.patch('pika.PlainCredentials', return_value=real_credentials)
 
         consumer = ArqueoConsumer()
 
