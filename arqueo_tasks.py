@@ -233,12 +233,12 @@ def create_aplicaciones(aplicaciones_data: list) -> list:
         else:
             importe = str(importe)
 
-        # Extract contraido (now boolean or integer, not string)
+        # Extract contraido (NEW structure: boolean, integer, or float)
         contraido = aplicacion.get('contraido', False)
-        # Keep as-is: boolean or integer
+        # Keep as-is: boolean, integer, or float
         if isinstance(contraido, bool):
             contraido_value = contraido
-        elif isinstance(contraido, int):
+        elif isinstance(contraido, (int, float)):
             contraido_value = contraido
         else:
             # Fallback for any unexpected type
