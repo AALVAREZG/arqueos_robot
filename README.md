@@ -108,42 +108,82 @@ Send messages to the `sical_queue.arqueo` queue with the following structure:
 
 ```json
 {
-  "task_id": "unique-task-id",
-  "operation_data": {
-    "operation": {
-      "fecha": "01/12/2024",
-      "caja": "001",
-      "tercero": "12345678A",
-      "naturaleza": "4",
-      "texto_sical": [
-        {
-          "tcargo": "Description of the operation"
+  "id_task": "204_08112024_5000_MPTOST",
+  "num_operaciones": 1,
+  "liquido_operaciones": 5000.0,
+  "creation_date": "2024-11-08T15:30:00.000Z",
+  "operaciones": [
+    {
+      "tipo": "arqueo",
+      "detalle": {
+        "fecha": "08112024",
+        "caja": "204",
+        "expediente": "",
+        "tercero": "43000000M",
+        "texto_sical": [
+          {
+            "tcargo": "RECAUDADO TRIBUTOS VARIOS C60"
+          }
+        ],
+        "naturaleza": "5",
+        "aplicaciones": [
+          {
+            "year": "2024",
+            "economica": "30012",
+            "proyecto": "",
+            "contraido": true,
+            "base_imponible": 0.0,
+            "tipo": 0.0,
+            "importe": 5000.0,
+            "cuenta_pgp": ""
+          }
+        ],
+        "descuentos": [],
+        "aux_data": {},
+        "metadata": {
+          "generation_datetime": "2024-11-08T15:30:00.000Z"
         }
-      ],
-      "final": [
-        {
-          "partida": "130",
-          "IMPORTE_PARTIDA": "100,50",
-          "contraido": false
-        },
-        {
-          "partida": "300",
-          "IMPORTE_PARTIDA": "250,75",
-          "contraido": true,
-          "proyecto": "PROJ001"
-        },
-        {
-          "total": "351,25"
-        }
-      ]
+      }
     }
-  }
+  ]
 }
 ```
 
+#### Field Descriptions
+
+**Top-level fields:**
+- `id_task`: Unique task identifier
+- `num_operaciones`: Number of operations in this task
+- `liquido_operaciones`: Total liquid amount
+- `creation_date`: Task creation timestamp (ISO 8601)
+- `operaciones`: Array of operations to process
+
+**Operation detalle fields:**
+- `fecha`: Date in format `ddmmyyyy` (e.g., "08112024")
+- `caja`: Cash register code
+- `expediente`: Expedition code (empty string or code)
+- `tercero`: Third-party identifier (NIF/CIF)
+- `naturaleza`: Operation nature ("4" for expenses, "5" for income)
+- `texto_sical`: Array with operation description
+  - `tcargo`: Operation description text
+- `aplicaciones`: Array of budget line applications (NEW structure)
+  - `year`: 4-digit year (e.g., "2024")
+  - `economica`: Budget line code (e.g., "30012")
+  - `proyecto`: Project code (empty or project number)
+  - `contraido`: Committed status (boolean `true`/`false` or 7-digit integer)
+  - `base_imponible`: Taxable base (float, default 0.0)
+  - `tipo`: Rate/type (float, default 0.0)
+  - `importe`: Amount (float)
+  - `cuenta_pgp`: PGP account code (empty or code)
+- `descuentos`: Array of discounts (usually empty)
+- `aux_data`: Auxiliary data object (usually empty)
+- `metadata`: Metadata object with generation info
+
+**Note**: The old `final` array with `partida` and `IMPORTE_PARTIDA` fields is **no longer supported**. Use the new `aplicaciones` structure.
+
 ### Response Format
 
-The robot sends responses to the `reply_to` queue:
+The robot sends responses to the `sical_results` queue:
 
 ```json
 {
@@ -163,6 +203,111 @@ The robot sends responses to the `reply_to` queue:
 }
 ```
 
+### Message Examples
+
+#### Example 1: Multiple Aplicaciones
+
+```json
+{
+  "tipo": "arqueo",
+  "detalle": {
+    "fecha": "08112024",
+    "caja": "207",
+    "expediente": "",
+    "tercero": "000",
+    "texto_sical": [{"tcargo": "TRANSF. N/F: LICENCIA DE OBRA"}],
+    "naturaleza": "4",
+    "aplicaciones": [
+      {
+        "year": "2024",
+        "economica": "290",
+        "proyecto": "",
+        "contraido": false,
+        "base_imponible": 0.0,
+        "tipo": 0.0,
+        "importe": 1200.0,
+        "cuenta_pgp": ""
+      },
+      {
+        "year": "2024",
+        "economica": "20104",
+        "proyecto": "",
+        "contraido": true,
+        "base_imponible": 0.0,
+        "tipo": 0.0,
+        "importe": 200.0,
+        "cuenta_pgp": ""
+      }
+    ],
+    "descuentos": [],
+    "aux_data": {},
+    "metadata": {"generation_datetime": "2024-11-08T15:30:00.000Z"}
+  }
+}
+```
+
+#### Example 2: Arqueo with Proyecto
+
+```json
+{
+  "tipo": "arqueo",
+  "detalle": {
+    "fecha": "08112024",
+    "caja": "207",
+    "expediente": "",
+    "tercero": "45575500B",
+    "texto_sical": [{"tcargo": "TRANSF N/F SUBVENCION GUARDERIA"}],
+    "naturaleza": "4",
+    "aplicaciones": [
+      {
+        "year": "2024",
+        "economica": "45002",
+        "proyecto": "24000014",
+        "contraido": false,
+        "base_imponible": 0.0,
+        "tipo": 0.0,
+        "importe": 1500.0,
+        "cuenta_pgp": ""
+      }
+    ],
+    "descuentos": [],
+    "aux_data": {},
+    "metadata": {"generation_datetime": "2024-11-08T15:30:00.000Z"}
+  }
+}
+```
+
+#### Example 3: Contraido with Numeric Value
+
+```json
+{
+  "tipo": "arqueo",
+  "detalle": {
+    "fecha": "08112024",
+    "caja": "203",
+    "expediente": "",
+    "tercero": "25352229L",
+    "texto_sical": [{"tcargo": "FRACCIONAMIENTO DEUDA"}],
+    "naturaleza": "5",
+    "aplicaciones": [
+      {
+        "year": "2024",
+        "economica": "39900",
+        "proyecto": "",
+        "contraido": 2500046,
+        "base_imponible": 0.0,
+        "tipo": 0.0,
+        "importe": 50.0,
+        "cuenta_pgp": ""
+      }
+    ],
+    "descuentos": [],
+    "aux_data": {},
+    "metadata": {"generation_datetime": "2024-11-08T15:30:00.000Z"}
+  }
+}
+```
+
 ### Operation Status Values
 
 - `PENDING` - Operation queued but not started
@@ -170,6 +315,54 @@ The robot sends responses to the `reply_to` queue:
 - `COMPLETED` - Successfully completed
 - `INCOMPLETED` - Partially completed with warnings
 - `FAILED` - Operation failed with errors
+
+### Migration from Old Format
+
+**⚠️ Breaking Change**: The consumer **no longer supports** the old message format.
+
+**Old Format (DEPRECATED - Not Supported)**:
+```json
+{
+  "final": [
+    {
+      "partida": "30012",
+      "contraido": "True",
+      "IMPORTE_PARTIDA": 5000.0
+    },
+    {
+      "partida": "Total",
+      "IMPORTE_PARTIDA": 0.0
+    }
+  ]
+}
+```
+
+**Field Migration Mapping**:
+| Old Field | New Field | Notes |
+|-----------|-----------|-------|
+| `final` | `aplicaciones` | Array renamed |
+| `partida` | `economica` | Budget line code |
+| `IMPORTE_PARTIDA` | `importe` | Amount (float, not string) |
+| `contraido: "True"/"False"` | `contraido` | Now boolean or integer |
+| N/A | `year` | NEW: 4-digit year |
+| N/A | `proyecto` | NEW: Project code |
+| N/A | `base_imponible` | NEW: Taxable base |
+| N/A | `tipo` | NEW: Rate/type |
+| N/A | `cuenta_pgp` | NEW: PGP account |
+| N/A | `expediente` | NEW: Expedition code |
+| N/A | `descuentos` | NEW: Discounts array |
+| N/A | `aux_data` | NEW: Auxiliary data |
+| N/A | `metadata` | NEW: Generation metadata |
+
+**Important Changes**:
+- ✅ Use `aplicaciones` array (not `final`)
+- ✅ Use `economica` field (not `partida`)
+- ✅ Use `importe` as float (not `IMPORTE_PARTIDA` as string)
+- ✅ Use `contraido` as boolean or integer (not string "True"/"False")
+- ✅ No "Total" rows in new structure
+- ✅ Response queue is now `sical_results` (not `reply_to`)
+
+For detailed migration information, see [docs/MIGRATION_VERIFICATION_REPORT.md](docs/MIGRATION_VERIFICATION_REPORT.md) and [docs/RESULT_QUEUE_CHANGE.md](docs/RESULT_QUEUE_CHANGE.md).
 
 ## Project Structure
 
