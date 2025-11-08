@@ -187,13 +187,20 @@ arqueos_robot/
 ├── .env.example                 # Example environment variables
 ├── .gitignore                   # Git ignore patterns
 ├── README.md                    # This file
-├── TESTING.md                   # Testing documentation
+├── docs/                        # Documentation
+│   ├── TESTING.md               # Testing documentation
+│   ├── MIGRATION_VERIFICATION_REPORT.md  # Migration verification
+│   └── RESULT_QUEUE_CHANGE.md   # Result queue documentation
 ├── tests/                       # Test suite
 │   ├── __init__.py
 │   ├── conftest.py              # Shared test fixtures
 │   ├── test_arqueo_tasks.py     # Business logic tests
 │   ├── test_arqueo_task_consumer.py  # Consumer tests
-│   └── test_config.py           # Configuration tests
+│   ├── test_config.py           # Configuration tests
+│   ├── test_migration.py        # Migration tests
+│   ├── test_exact_structure.py  # Structure validation tests
+│   ├── test_result_queue.py     # Result queue tests
+│   └── verify_new_structure.py  # Comprehensive verification
 ├── .github/
 │   └── workflows/
 │       └── test.yml             # CI/CD pipeline
@@ -230,7 +237,7 @@ The project has comprehensive test coverage:
 - ✅ Configuration management
 - ✅ Error handling
 
-For detailed testing information, see [TESTING.md](TESTING.md).
+For detailed testing information, see [TESTING.md](docs/TESTING.md).
 
 ## Configuration
 
@@ -387,7 +394,7 @@ External Service
 
 For issues, questions, or contributions:
 - Create an issue: https://github.com/AALVAREZG/arqueos_robot/issues
-- Documentation: See [TESTING.md](TESTING.md)
+- Documentation: See [TESTING.md](docs/TESTING.md)
 
 ---
 

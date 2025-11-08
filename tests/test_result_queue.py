@@ -9,7 +9,8 @@ from unittest.mock import MagicMock, patch
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+# Add parent directory to path to import modules
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from arqueo_task_consumer import ArqueoConsumer
 
