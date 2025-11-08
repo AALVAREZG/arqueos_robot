@@ -93,7 +93,7 @@ def test_complete_task_structure():
             'app_importe': app['importe'] == '5000,0',
             'app_year': app['year'] == '2024',
             'app_proyecto': app['proyecto'] == '',
-            'app_contraido': app['contraido'] == 1.0 or app['contraido'] == True,
+            'app_contraido': app['contraido'] == 1,  # 1.0 converted to int 1
             'app_base_imponible': app['base_imponible'] == 0.0,
             'app_tipo': app['tipo'] == 0.0,
             'app_cuenta_pgp': app['cuenta_pgp'] == '',
@@ -319,7 +319,7 @@ if __name__ == '__main__':
         print("  • Multiple aplicaciones handled")
         print("  • Numeric contraido (7-digit integer) supported")
         print("  • Boolean contraido (true/false) supported")
-        print("  • Float contraido (1.0, 0.0) supported")
+        print("  • Float contraido (1.0, 0.0) converted to int (fallback)")
         print("  • All new fields extracted (year, proyecto, base_imponible, etc.)")
         print("  • Old 'final' structure NOT supported (intentionally)")
         print("  • Old 'ado' field NOT accessed")

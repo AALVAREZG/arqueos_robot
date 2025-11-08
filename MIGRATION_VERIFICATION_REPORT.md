@@ -164,15 +164,17 @@ The RabbitMQ consumer for SICAL Robot arqueo tasks has been **successfully migra
 
 ## Contraido Handling
 
-The consumer now correctly handles all contraido value types:
+The consumer now correctly handles contraido values per specification:
 
-| Type | Example | Result | Status |
-|------|---------|--------|--------|
-| Boolean | `true` | `True` (bool) | ✅ |
-| Boolean | `false` | `False` (bool) | ✅ |
-| Integer | `2500046` | `2500046` (int) | ✅ |
-| Float | `1.0` | `1.0` (float) | ✅ |
-| Float | `0.0` | `0.0` (float) | ✅ |
+| Input Type | Example | Result | Status |
+|------------|---------|--------|--------|
+| Boolean | `true` | `True` (bool) | ✅ Supported |
+| Boolean | `false` | `False` (bool) | ✅ Supported |
+| Integer | `2500046` | `2500046` (int) | ✅ Supported |
+| Float (fallback) | `1.0` | `1` (int) | ✅ Converted to int |
+| Float (fallback) | `0.0` | `0` (int) | ✅ Converted to int |
+
+**Note**: Per specification, contraido should only be **boolean or integer**. Float values are handled as a fallback and converted to integers.
 
 ---
 

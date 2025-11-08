@@ -162,39 +162,37 @@ def test_no_total_row_filtering():
 
 
 def test_contraido_types():
-    """Verify contraido handles boolean, integer, and float."""
+    """Verify contraido handles boolean and integer (NOT float)."""
     print("\n" + "="*70)
     print("VERIFICATION: Contraido Type Handling")
     print("="*70)
 
     test_cases = [
+        # Boolean values - keep as boolean
         ({'economica': '1', 'importe': 100, 'year': '2024', 'proyecto': '',
           'contraido': True, 'base_imponible': 0.0, 'tipo': 0.0, 'cuenta_pgp': ''},
-         True, 'boolean True'),
+         True, bool, 'boolean True'),
         ({'economica': '2', 'importe': 100, 'year': '2024', 'proyecto': '',
           'contraido': False, 'base_imponible': 0.0, 'tipo': 0.0, 'cuenta_pgp': ''},
-         False, 'boolean False'),
+         False, bool, 'boolean False'),
+        # Integer values - keep as integer
         ({'economica': '3', 'importe': 100, 'year': '2024', 'proyecto': '',
           'contraido': 2500046, 'base_imponible': 0.0, 'tipo': 0.0, 'cuenta_pgp': ''},
-         2500046, 'integer 7-digit'),
+         2500046, int, 'integer 7-digit'),
+        # Float values - convert to int (fallback handling)
         ({'economica': '4', 'importe': 100, 'year': '2024', 'proyecto': '',
           'contraido': 1.0, 'base_imponible': 0.0, 'tipo': 0.0, 'cuenta_pgp': ''},
-         1.0, 'float 1.0'),
+         1, int, 'float 1.0 → int 1 (fallback)'),
         ({'economica': '5', 'importe': 100, 'year': '2024', 'proyecto': '',
           'contraido': 0.0, 'base_imponible': 0.0, 'tipo': 0.0, 'cuenta_pgp': ''},
-         0.0, 'float 0.0'),
+         0, int, 'float 0.0 → int 0 (fallback)'),
     ]
 
     checks = {}
-    for aplicacion, expected, description in test_cases:
+    for aplicacion, expected_value, expected_type, description in test_cases:
         result = create_aplicaciones([aplicacion])
         actual = result[0]['contraido']
-        # For float cases, we need to be flexible since bool(1.0) == True
-        if isinstance(expected, float):
-            # Accept both float and boolean for float inputs
-            passed = (actual == expected or actual == bool(expected))
-        else:
-            passed = actual == expected and type(actual) == type(expected)
+        passed = (actual == expected_value and type(actual) == expected_type)
         checks[description] = passed
 
     print("\n✓ CONTRAIDO TYPE HANDLING:")
@@ -280,7 +278,7 @@ if __name__ == '__main__':
         print("  ✓ No Total row filtering (not needed)")
         print("  ✓ texto_sical.ado not accessed (only tcargo)")
         print("  ✓ Field mappings: economica→partida, importe→importe")
-        print("  ✓ Contraido: boolean, integer, and float supported")
+        print("  ✓ Contraido: boolean and integer (float converted to int)")
         sys.exit(0)
     else:
         print("\n" + "="*70)
