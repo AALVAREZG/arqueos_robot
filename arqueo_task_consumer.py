@@ -39,7 +39,13 @@ class ArqueoConsumer:
                 queue=self.queue_name,
                 durable=True
             )
-            
+
+            # Declare the results queue (where we send responses)
+            self.channel.queue_declare(
+                queue='sical_results',
+                durable=True
+            )
+
             # Set QoS to handle one message at a time
             self.channel.basic_qos(prefetch_count=1)
             logger.info("RabbitMQ connection established successfully")
@@ -70,14 +76,14 @@ class ArqueoConsumer:
                 'result': dataclasses.asdict(result)
             }
             
-            # Send response back through RabbitMQ
+            # Send response back through RabbitMQ to sical_results queue
             ch.basic_publish(
                 exchange='',
-                routing_key=properties.reply_to,
+                routing_key='sical_results',  # Fixed result queue
                 properties=pika.BasicProperties(
                     correlation_id=properties.correlation_id
                 ),
-                
+
                 body=json.dumps(response, cls=OperationEncoder)
             )
             
