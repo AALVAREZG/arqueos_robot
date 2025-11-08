@@ -11,81 +11,117 @@ from unittest.mock import Mock, MagicMock
 
 @pytest.fixture
 def sample_operation_data() -> Dict[str, Any]:
-    """Fixture providing sample operation data for testing."""
+    """Fixture providing sample operation data for testing (NEW structure)."""
     return {
         'fecha': '01/12/2024',
         'caja': '001',
+        'expediente': '',
         'tercero': '12345678A',
         'naturaleza': '4',
         'texto_sical': [{'tcargo': 'Test arqueo operation'}],
-        'final': [
+        'aplicaciones': [
             {
-                'partida': '130',
-                'IMPORTE_PARTIDA': '100,50',
-                'contraido': False
+                'year': '2024',
+                'economica': '130',
+                'proyecto': '',
+                'contraido': False,
+                'base_imponible': 0.0,
+                'tipo': 0.0,
+                'importe': 100.50,
+                'cuenta_pgp': ''
             },
             {
-                'partida': '300',
-                'IMPORTE_PARTIDA': '250,75',
+                'year': '2024',
+                'economica': '300',
+                'proyecto': 'PROJ001',
                 'contraido': True,
-                'proyecto': 'PROJ001'
+                'base_imponible': 0.0,
+                'tipo': 0.0,
+                'importe': 250.75,
+                'cuenta_pgp': ''
             },
             {
-                'partida': '45000',
-                'IMPORTE_PARTIDA': '500,00',
-                'contraido': False
-            },
-            {
-                'total': '851,25'  # This is typically the last item
+                'year': '2024',
+                'economica': '45000',
+                'proyecto': '',
+                'contraido': False,
+                'base_imponible': 0.0,
+                'tipo': 0.0,
+                'importe': 500.00,
+                'cuenta_pgp': ''
             }
-        ]
+        ],
+        'descuentos': [],
+        'aux_data': {},
+        'metadata': {
+            'generation_datetime': '2024-12-01T10:00:00.000Z'
+        }
     }
 
 
 @pytest.fixture
 def sample_operation_data_naturaleza_5() -> Dict[str, Any]:
-    """Fixture providing sample operation data with naturaleza=5."""
+    """Fixture providing sample operation data with naturaleza=5 (NEW structure)."""
     return {
         'fecha': '15/12/2024',
         'caja': '002',
+        'expediente': '',
         'tercero': '87654321B',
         'naturaleza': '5',
         'texto_sical': [{'tcargo': 'Naturaleza 5 test operation'}],
-        'final': [
+        'aplicaciones': [
             {
-                'partida': '290',
-                'IMPORTE_PARTIDA': '1500,00',
-                'contraido': True
-            },
-            {
-                'total': '1500,00'
+                'year': '2024',
+                'economica': '290',
+                'proyecto': '',
+                'contraido': True,
+                'base_imponible': 0.0,
+                'tipo': 0.0,
+                'importe': 1500.00,
+                'cuenta_pgp': ''
             }
-        ]
+        ],
+        'descuentos': [],
+        'aux_data': {},
+        'metadata': {
+            'generation_datetime': '2024-12-15T10:00:00.000Z'
+        }
     }
 
 
 @pytest.fixture
 def sample_aplicaciones() -> list:
-    """Fixture providing sample aplicaciones data."""
+    """Fixture providing sample aplicaciones data (NEW structure)."""
     return [
         {
-            'partida': '130',
-            'IMPORTE_PARTIDA': '100,50',
-            'contraido': False
+            'year': '2024',
+            'economica': '130',
+            'proyecto': '',
+            'contraido': False,
+            'base_imponible': 0.0,
+            'tipo': 0.0,
+            'importe': 100.50,
+            'cuenta_pgp': ''
         },
         {
-            'partida': '300',
-            'IMPORTE_PARTIDA': '250,75',
+            'year': '2024',
+            'economica': '300',
+            'proyecto': 'PROJ001',
             'contraido': True,
-            'proyecto': 'PROJ001'
+            'base_imponible': 0.0,
+            'tipo': 0.0,
+            'importe': 250.75,
+            'cuenta_pgp': ''
         },
         {
-            'partida': '999',  # Unmapped partida
-            'IMPORTE_PARTIDA': '50,00',
-            'contraido': False
-        },
-        {
-            'total': '401,25'
+            'year': '2024',
+            'economica': '999',  # Unmapped partida
+            'proyecto': '',
+            'contraido': False,
+            'base_imponible': 0.0,
+            'tipo': 0.0,
+            'importe': 50.00,
+            'cuenta_pgp': ''
         }
     ]
 
@@ -166,38 +202,55 @@ def sample_rabbitmq_message(sample_operation_data) -> bytes:
 
 @pytest.fixture
 def expected_arqueo_data() -> Dict[str, Any]:
-    """Fixture providing expected transformed arqueo data."""
+    """Fixture providing expected transformed arqueo data (NEW structure)."""
     return {
         'fecha': '01/12/2024',
         'caja': '001',
-        'expediente': 'rbt-apunte-arqueo',
+        'expediente': '',
         'tercero': '12345678A',
         'naturaleza': '4',
         'resumen': 'Test arqueo operation',
+        'descuentos': [],
+        'aux_data': {},
+        'metadata': {
+            'generation_datetime': '2024-12-01T10:00:00.000Z'
+        },
         'aplicaciones': [
             {
-                'partida': '130',
-                'importe': '100,50',
+                'partida': '130',  # Internal name kept for SICAL compatibility
+                'importe': '100.5',
                 'contraido': False,
-                'proyecto': False,
+                'proyecto': '',
+                'year': '2024',
                 'cuenta': '727',
-                'otro': False
+                'otro': False,
+                'base_imponible': 0.0,
+                'tipo': 0.0,
+                'cuenta_pgp': ''
             },
             {
                 'partida': '300',
-                'importe': '250,75',
+                'importe': '250.75',
                 'contraido': True,
                 'proyecto': 'PROJ001',
+                'year': '2024',
                 'cuenta': '740',
-                'otro': False
+                'otro': False,
+                'base_imponible': 0.0,
+                'tipo': 0.0,
+                'cuenta_pgp': ''
             },
             {
                 'partida': '45000',
-                'importe': '500,00',
+                'importe': '500.0',
                 'contraido': False,
-                'proyecto': False,
+                'proyecto': '',
+                'year': '2024',
                 'cuenta': '7501',
-                'otro': False
+                'otro': False,
+                'base_imponible': 0.0,
+                'tipo': 0.0,
+                'cuenta_pgp': ''
             }
         ]
     }

@@ -81,18 +81,19 @@ class TestCreateAplicaciones:
 
     @pytest.mark.unit
     def test_basic_aplicaciones_transformation(self, sample_aplicaciones):
-        """Test basic transformation of aplicaciones data."""
+        """Test basic transformation of aplicaciones data (NEW structure)."""
         result = create_aplicaciones(sample_aplicaciones)
 
-        # Should exclude the last item (total)
+        # Should have all 3 items (no total row in new structure)
         assert len(result) == 3
 
         # Check first aplicacion
         assert result[0]['partida'] == '130'
-        assert result[0]['importe'] == '100,50'
+        assert result[0]['importe'] == '100,5'  # Float to string with comma
         assert result[0]['contraido'] is False
         assert result[0]['cuenta'] == '727'  # From partidas_cuentaPG mapping
         assert result[0]['otro'] is False
+        assert result[0]['year'] == '2024'
 
     @pytest.mark.unit
     def test_aplicacion_with_proyecto(self, sample_aplicaciones):
@@ -107,12 +108,12 @@ class TestCreateAplicaciones:
         """Test that unmapped partida codes return '000'."""
         result = create_aplicaciones(sample_aplicaciones)
 
-        # Third item has partida '999' which is not in mapping
+        # Third item has economica '999' which is not in mapping
         assert result[2]['cuenta'] == '000'
 
     @pytest.mark.unit
     def test_contraido_field_handling(self, sample_aplicaciones):
-        """Test that contraido field is properly cleaned."""
+        """Test that contraido field is properly handled as boolean or integer."""
         result = create_aplicaciones(sample_aplicaciones)
 
         assert result[0]['contraido'] is False
@@ -120,27 +121,35 @@ class TestCreateAplicaciones:
 
     @pytest.mark.unit
     def test_empty_aplicaciones_list(self):
-        """Test with only total item (edge case)."""
-        final_data = [{'total': '0,00'}]
-        result = create_aplicaciones(final_data)
+        """Test with empty aplicaciones list."""
+        aplicaciones_data = []
+        result = create_aplicaciones(aplicaciones_data)
 
         assert len(result) == 0
 
     @pytest.mark.unit
-    def test_partida_type_conversion(self):
-        """Test that partida is converted to string."""
-        final_data = [
-            {'partida': 130, 'IMPORTE_PARTIDA': '100,00'},  # Integer partida
-            {'total': '100,00'}
+    def test_economica_type_conversion(self):
+        """Test that economica is converted to string."""
+        aplicaciones_data = [
+            {
+                'year': '2024',
+                'economica': 130,  # Integer economica
+                'proyecto': '',
+                'contraido': False,
+                'base_imponible': 0.0,
+                'tipo': 0.0,
+                'importe': 100.00,
+                'cuenta_pgp': ''
+            }
         ]
-        result = create_aplicaciones(final_data)
+        result = create_aplicaciones(aplicaciones_data)
 
         assert result[0]['partida'] == '130'
         assert isinstance(result[0]['partida'], str)
 
     @pytest.mark.unit
     def test_known_partida_mappings(self):
-        """Test several known partida to cuenta mappings."""
+        """Test several known economica to cuenta mappings."""
         test_cases = [
             ('130', '727'),    # IAE
             ('300', '740'),    # SERVICIO ABAST AGUA
@@ -148,14 +157,22 @@ class TestCreateAplicaciones:
             ('42000', '7501'), # PIE. PARTICIP TRIB ESTADO
         ]
 
-        for partida, expected_cuenta in test_cases:
-            final_data = [
-                {'partida': partida, 'IMPORTE_PARTIDA': '100,00'},
-                {'total': '100,00'}
+        for economica, expected_cuenta in test_cases:
+            aplicaciones_data = [
+                {
+                    'year': '2024',
+                    'economica': economica,
+                    'proyecto': '',
+                    'contraido': False,
+                    'base_imponible': 0.0,
+                    'tipo': 0.0,
+                    'importe': 100.00,
+                    'cuenta_pgp': ''
+                }
             ]
-            result = create_aplicaciones(final_data)
+            result = create_aplicaciones(aplicaciones_data)
             assert result[0]['cuenta'] == expected_cuenta, \
-                f"Partida {partida} should map to {expected_cuenta}"
+                f"Economica {economica} should map to {expected_cuenta}"
 
 
 class TestCreateArqueoData:
@@ -163,15 +180,18 @@ class TestCreateArqueoData:
 
     @pytest.mark.unit
     def test_basic_data_transformation(self, sample_operation_data, expected_arqueo_data):
-        """Test basic transformation from operation_data to arqueo_data."""
+        """Test basic transformation from operation_data to arqueo_data (NEW structure)."""
         result = create_arqueo_data(sample_operation_data)
 
         assert result['fecha'] == expected_arqueo_data['fecha']
         assert result['caja'] == expected_arqueo_data['caja']
-        assert result['expediente'] == 'rbt-apunte-arqueo'
+        assert result['expediente'] == expected_arqueo_data['expediente']
         assert result['tercero'] == expected_arqueo_data['tercero']
         assert result['naturaleza'] == expected_arqueo_data['naturaleza']
         assert result['resumen'] == expected_arqueo_data['resumen']
+        assert result['descuentos'] == expected_arqueo_data['descuentos']
+        assert result['aux_data'] == expected_arqueo_data['aux_data']
+        assert result['metadata'] == expected_arqueo_data['metadata']
 
     @pytest.mark.unit
     def test_default_naturaleza_value(self):
@@ -179,9 +199,10 @@ class TestCreateArqueoData:
         operation_data = {
             'fecha': '01/12/2024',
             'caja': '001',
+            'expediente': '',
             'tercero': '12345678A',
             'texto_sical': [{'tcargo': 'Test'}],
-            'final': [{'total': '0,00'}]
+            'aplicaciones': []
         }
         result = create_arqueo_data(operation_data)
 
@@ -195,11 +216,26 @@ class TestCreateArqueoData:
         assert result['naturaleza'] == '5'
 
     @pytest.mark.unit
-    def test_expediente_always_set(self, sample_operation_data):
-        """Test that expediente is always set to 'rbt-apunte-arqueo'."""
-        result = create_arqueo_data(sample_operation_data)
+    def test_expediente_defaults_to_rbt_apunte_arqueo(self):
+        """Test that expediente defaults to 'rbt-apunte-arqueo' when not provided."""
+        operation_data = {
+            'fecha': '01/12/2024',
+            'caja': '001',
+            'tercero': '12345678A',
+            'texto_sical': [{'tcargo': 'Test'}],
+            'aplicaciones': []
+        }
+        result = create_arqueo_data(operation_data)
 
         assert result['expediente'] == 'rbt-apunte-arqueo'
+
+    @pytest.mark.unit
+    def test_expediente_from_operation_data(self, sample_operation_data):
+        """Test that expediente can be extracted from operation_data."""
+        result = create_arqueo_data(sample_operation_data)
+
+        # In the new structure, expediente comes from the message
+        assert result['expediente'] == ''
 
     @pytest.mark.unit
     def test_resumen_extraction(self, sample_operation_data):
@@ -215,7 +251,7 @@ class TestCreateArqueoData:
 
         assert 'aplicaciones' in result
         assert isinstance(result['aplicaciones'], list)
-        assert len(result['aplicaciones']) == 3  # Excludes total
+        assert len(result['aplicaciones']) == 3  # All items (no total row)
 
     @pytest.mark.unit
     def test_empty_texto_sical_handling(self):
@@ -223,13 +259,26 @@ class TestCreateArqueoData:
         operation_data = {
             'fecha': '01/12/2024',
             'caja': '001',
+            'expediente': '',
             'tercero': '12345678A',
             'texto_sical': [{}],  # Empty dict
-            'final': [{'total': '0,00'}]
+            'aplicaciones': []
         }
         result = create_arqueo_data(operation_data)
 
         assert result['resumen'] is None
+
+    @pytest.mark.unit
+    def test_new_fields_extraction(self, sample_operation_data):
+        """Test that new fields (descuentos, aux_data, metadata) are extracted."""
+        result = create_arqueo_data(sample_operation_data)
+
+        assert 'descuentos' in result
+        assert result['descuentos'] == []
+        assert 'aux_data' in result
+        assert result['aux_data'] == {}
+        assert 'metadata' in result
+        assert 'generation_datetime' in result['metadata']
 
 
 class TestOperationStatus:
