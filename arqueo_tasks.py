@@ -1,14 +1,15 @@
-import datetime
-import glob
-from robocorp.tasks import task
-from robocorp import windows
-import time, os, json
-from pathlib import Path
-from datetime import datetime
-from typing import Dict, Any, Optional
-from dataclasses import dataclass
-from enum import Enum
+# Standard library imports
+import json
 import logging
+import os
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Dict, Any, Optional
+
+# Third-party imports
 from robocorp import windows
 from robocorp.tasks import task
 
@@ -127,7 +128,7 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
     Returns:
         OperationResult: Object containing the operation results and status
     """
-    print('Entry Operación arqueo: ', operation_data)
+    arqueo_logger.info('Entry Operación arqueo: %s', operation_data)
     init_time = datetime.now()
     result = OperationResult(
         status=OperationStatus.PENDING,
@@ -140,7 +141,7 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
     try:
         # Prepare operation data
         datos_arqueo = create_arqueo_data(operation_data)
-        print('Created arqueo data: ', datos_arqueo)
+        arqueo_logger.debug('Created arqueo data: %s', datos_arqueo)
         # Setup SICAL window
         if not setup_sical_window(window_manager):
             result.status = OperationStatus.FAILED
@@ -195,7 +196,7 @@ def create_arqueo_data(operation_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 def clean_value(value):
-    print("value passed", value, type(value))
+    arqueo_logger.debug("Processing value: %s (type: %s)", value, type(value).__name__)
     if isinstance(value, bool):
         return value  # Return boolean values as-is
     elif isinstance(value, str) and value.lower() == 'false':
@@ -208,12 +209,6 @@ def clean_value(value):
         return str(value)
     # Return the original value if it's not a string or int
     return bool(value)
-
-@task()
-def prueba():
-    _aplic = {}
-    new_v = clean_value(_aplic.get('contraido', False))
-    print(new_v, type(new_v))
 
 def create_aplicaciones(final_data: list) -> list:
     """Transform aplicaciones data into SICAL-compatible format"""
@@ -243,7 +238,7 @@ def setup_sical_window(window_manager: SicalWindowManager) -> bool:
 def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any], 
                            result: OperationResult) -> OperationResult:
     """Process the arqueo operation in SICAL"""
-    print('Processing arqueo operation...')
+    arqueo_logger.info('Processing arqueo operation...')
     try:
         # Initialize form
         ventana_arqueo.find('path:"2|4"').click()  # New button
@@ -276,7 +271,7 @@ def abrir_ventana_opcion_en_menu(menu_a_buscar):
 
     app = windows.find_window('regex:.*FMenuSical', raise_error=False)
     if not app:
-        print('¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡', 'SICAL CLOSED?????')
+        arqueo_logger.error('SICAL main menu window not found - application may be closed')
         return False
 
     if not menu_a_buscar:
@@ -430,62 +425,6 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
 
             total_operacion = ventana_arqueo.find('path:"3|3|4"').get_value().replace(",", ".")
 
-        '''
-        for i, aplicacion in enumerate(datos_arqueo["aplicaciones"]):
-
-            if (
-                float(aplicacion["importe"].replace(",", ".")) > 0.0
-            ):  # si el importe de la partida es mayor que cero
-                
-                new_button_element = ventana_arqueo.find('path:"3|2|2" and class:"TBitBtn"').click()
-                ventana_arqueo.send_keys(
-                    keys=aplicacion["partida"],
-                    interval=0.01,
-                    wait_time=default_wait_time,
-                    send_enter=False,
-                )
-                
-                if not aplicacion.get("contraido", False):
-                # Code runs if "contraido" doesn't exist or has any falsy value:
-                    time.sleep(0.2)
-                    
-                    ventana_arqueo.send_keys(
-                        keys="{Tab}{Tab}{Tab}", wait_time=default_wait_time, interval=0.1
-                    )
-                    ventana_arqueo.send_keys(
-                        keys=aplicacion["importe"],
-                        interval=0.1,
-                        wait_time=default_wait_time,
-                        send_enter=False,
-                    )
-                    ventana_arqueo.send_keys(keys="{Enter}", wait_time=default_wait_time)
-                    time.sleep(
-                        2.0
-                    )  # introduzco un delay porque la opción timeout de wait no funciona
-                    windows.wait_for_condition(new_button_element.is_disposed)
-                    break
-                else:
-                    if datos_arqueo.get("naturaleza", None) == "5":
-                        arqueo_logger.info("NATURALEZA 5. SEND ADITIONAL SEND KEYs")
-                        ventana_arqueo.send_keys(keys="{Tab}", wait_time=0.02, interval=0.02)
-
-                    ventana_arqueo.send_keys(keys="{Tab}{Tab}{Tab}", wait_time=0.02, interval=0.02)
-                    ventana_arqueo.send_keys(
-                        keys=aplicacion["importe"],
-                        interval=0.02,
-                        wait_time=0.02,
-                        send_enter=False,
-                    )
-                    ventana_arqueo.send_keys(keys="{Enter}", wait_time=0.02)
-                    ventana_arqueo.send_keys(keys=aplicacion["cuenta"], interval=0.02, wait_time=0.02)
-                    ckeck_button_element = ventana_arqueo.find('path:"3|2|4"').click()
-
-                suma_aplicaciones = suma_aplicaciones + float(
-                    aplicacion["importe"].replace(",", ".")
-                )
-
-            total_operacion = ventana_arqueo.find('path:"3|3|4"').get_value().replace(",", ".")
-        '''
         result.total_operacion = total_operacion
         result.suma_aplicaciones = suma_aplicaciones
         
