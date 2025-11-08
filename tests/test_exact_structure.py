@@ -7,7 +7,8 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+# Add parent directory to path to import modules
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from arqueo_tasks import create_arqueo_data
 
@@ -108,7 +109,7 @@ def test_complete_task_structure():
         if not passed:
             all_passed = False
 
-    return all_passed
+    assert all_passed, "Some checks failed"
 
 
 def test_multiple_aplicaciones_example():
@@ -177,7 +178,7 @@ def test_multiple_aplicaciones_example():
         if not passed:
             all_passed = False
 
-    return all_passed
+    assert all_passed, "Some checks failed"
 
 
 def test_numeric_contraido_example():
@@ -232,7 +233,7 @@ def test_numeric_contraido_example():
         if not passed:
             all_passed = False
 
-    return all_passed
+    assert all_passed, "Some checks failed"
 
 
 def test_old_structure_rejected():
@@ -283,7 +284,7 @@ def test_old_structure_rejected():
         if not passed:
             all_passed = False
 
-    return all_passed
+    assert all_passed, "Some checks failed"
 
 
 if __name__ == '__main__':
@@ -293,22 +294,24 @@ if __name__ == '__main__':
     print("╚" + "="*68 + "╝")
     print()
 
-    results = {
-        'Complete Task Structure': test_complete_task_structure(),
-        'Multiple Aplicaciones': test_multiple_aplicaciones_example(),
-        'Numeric Contraido': test_numeric_contraido_example(),
-        'Old Structure Rejected': test_old_structure_rejected(),
-    }
+    try:
+        test_complete_task_structure()
+        test_multiple_aplicaciones_example()
+        test_numeric_contraido_example()
+        test_old_structure_rejected()
 
-    print("\n" + "="*70)
-    print("FINAL SUMMARY")
-    print("="*70)
+        print("\n" + "="*70)
+        print("FINAL SUMMARY")
+        print("="*70)
+        print("✓ PASS: Complete Task Structure")
+        print("✓ PASS: Multiple Aplicaciones")
+        print("✓ PASS: Numeric Contraido")
+        print("✓ PASS: Old Structure Rejected")
 
-    for test_name, passed in results.items():
-        status = "✓ PASS" if passed else "✗ FAIL"
-        print(f"{status}: {test_name}")
-
-    all_passed = all(results.values())
+        all_passed = True
+    except AssertionError as e:
+        print(f"\n✗ FAIL: {e}")
+        all_passed = False
 
     if all_passed:
         print("\n" + "="*70)

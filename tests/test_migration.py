@@ -5,8 +5,8 @@ import json
 import sys
 from pathlib import Path
 
-# Add current directory to path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add parent directory to path to import modules
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import only the data transformation functions (not the robocorp ones)
 from arqueo_tasks import create_arqueo_data, create_aplicaciones
