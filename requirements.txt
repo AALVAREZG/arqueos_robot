@@ -1,6 +1,14 @@
+# Core dependencies
 pika==1.3.2
 python-dotenv==1.0.0
 tenacity==8.2.2
+
+# RPA/Robocorp dependencies
+rpaframework==30.0.1
+robocorp==2.1.3
+robocorp-browser==2.3.4
+robocorp-windows==1.0.4
+robocorp-truststore==0.8.0
 
 # Testing dependencies
 pytest==7.4.3
