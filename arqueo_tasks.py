@@ -185,14 +185,20 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
 
 def create_arqueo_data(operation_data: Dict[str, Any]) -> Dict[str, Any]:
     """Transform operation data from message into SICAL-compatible format"""
+    # Extract aplicaciones from new structure
+    aplicaciones_data = operation_data.get('aplicaciones', [])
+
     return {
         'fecha': operation_data.get('fecha'),
         'caja': operation_data.get('caja'),
-        'expediente': 'rbt-apunte-arqueo',
+        'expediente': operation_data.get('expediente', 'rbt-apunte-arqueo'),
         'tercero': operation_data.get('tercero'),
         'naturaleza': operation_data.get('naturaleza', '4'),
         'resumen': operation_data.get('texto_sical', [{}])[0].get('tcargo'),
-        'aplicaciones': create_aplicaciones(operation_data.get('final', []))
+        'aplicaciones': create_aplicaciones(aplicaciones_data),
+        'descuentos': operation_data.get('descuentos', []),
+        'aux_data': operation_data.get('aux_data', {}),
+        'metadata': operation_data.get('metadata', {})
     }
 
 def clean_value(value):
@@ -210,18 +216,60 @@ def clean_value(value):
     # Return the original value if it's not a string or int
     return bool(value)
 
-def create_aplicaciones(final_data: list) -> list:
+def create_aplicaciones(aplicaciones_data: list) -> list:
     """Transform aplicaciones data into SICAL-compatible format"""
     aplicaciones = []
-    for aplicacion in final_data[:-1]:  # Exclude last item (total)
+
+    # Process all aplicaciones (no Total row in new structure)
+    for aplicacion in aplicaciones_data:
+        # Extract economica (was 'partida' in old structure)
+        economica = str(aplicacion.get('economica', ''))
+
+        # Extract importe (was 'IMPORTE_PARTIDA' in old structure)
+        importe = aplicacion.get('importe', 0.0)
+        # Convert to string with comma decimal separator for SICAL
+        if isinstance(importe, (int, float)):
+            importe = str(importe).replace('.', ',')
+        else:
+            importe = str(importe)
+
+        # Extract contraido (NEW structure: boolean or 7-digit integer)
+        contraido = aplicacion.get('contraido', False)
+        # Keep as-is: boolean or integer (no float support)
+        if isinstance(contraido, bool):
+            contraido_value = contraido
+        elif isinstance(contraido, int):
+            contraido_value = contraido
+        else:
+            # Fallback: convert float to int if needed, otherwise to bool
+            if isinstance(contraido, float):
+                # Convert float like 1.0 to int 1, or 0.0 to int 0
+                contraido_value = int(contraido)
+            else:
+                contraido_value = bool(contraido)
+
+        # Extract proyecto (same name as before)
+        proyecto = aplicacion.get('proyecto', False)
+
+        # Extract year (new field)
+        year = aplicacion.get('year', '')
+
+        # Get cuenta from mapping
+        cuenta = partidas_cuentaPG.get(economica, '000')
+
         aplicaciones.append({
-            'partida': str(aplicacion['partida']),
-            'importe': str(aplicacion['IMPORTE_PARTIDA']),
-            'contraido': clean_value(aplicacion.get('contraido', False)),
-            'proyecto': aplicacion.get('proyecto', False),
-            'cuenta': partidas_cuentaPG.get(str(aplicacion['partida']), '000'),
+            'partida': economica,  # Keep internal name as 'partida' for SICAL compatibility
+            'importe': importe,
+            'contraido': contraido_value,
+            'proyecto': proyecto,
+            'year': year,
+            'cuenta': cuenta,
             'otro': False,
+            'base_imponible': aplicacion.get('base_imponible', 0.0),
+            'tipo': aplicacion.get('tipo', 0.0),
+            'cuenta_pgp': aplicacion.get('cuenta_pgp', '')
         })
+
     return aplicaciones
 
 def setup_sical_window(window_manager: SicalWindowManager) -> bool:
