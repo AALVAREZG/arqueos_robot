@@ -147,7 +147,7 @@ def test_result_queue_fixed():
             if not passed:
                 all_passed = False
 
-        return all_passed
+        assert all_passed, "Some checks failed"
 
 
 if __name__ == '__main__':
@@ -158,23 +158,23 @@ if __name__ == '__main__':
     print()
 
     try:
-        passed = test_result_queue_fixed()
+        test_result_queue_fixed()
 
         print("\n" + "="*70)
-        if passed:
-            print("🎉 ALL CHECKS PASSED!")
-            print("="*70)
-            print("\n✅ CONFIRMED:")
-            print("  • Responses sent to fixed 'sical_results' queue")
-            print("  • NOT using reply_to pattern (old pattern)")
-            print("  • sical_results queue declared as durable")
-            print("  • Correlation ID preserved for message tracking")
-            print("  • Response format correct")
-            sys.exit(0)
-        else:
-            print("❌ SOME CHECKS FAILED")
-            print("="*70)
-            sys.exit(1)
+        print("🎉 ALL CHECKS PASSED!")
+        print("="*70)
+        print("\n✅ CONFIRMED:")
+        print("  • Responses sent to fixed 'sical_results' queue")
+        print("  • NOT using reply_to pattern (old pattern)")
+        print("  • sical_results queue declared as durable")
+        print("  • Correlation ID preserved for message tracking")
+        print("  • Response format correct")
+        sys.exit(0)
+    except AssertionError as e:
+        print(f"\n❌ ASSERTION FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
     except Exception as e:
         print(f"\n❌ ERROR: {e}")
         import traceback

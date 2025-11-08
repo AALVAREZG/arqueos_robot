@@ -71,14 +71,20 @@ class TestSetupConnection:
 
     @pytest.mark.integration
     def test_queue_declaration(self, mock_rabbitmq_connection):
-        """Test that queue is declared as durable."""
+        """Test that both input and result queues are declared as durable."""
         consumer = ArqueoConsumer()
 
-        # Verify queue was declared with correct parameters
-        consumer.channel.queue_declare.assert_called_with(
-            queue='sical_queue.arqueo',
-            durable=True
-        )
+        # Verify both queues were declared
+        assert consumer.channel.queue_declare.call_count == 2
+
+        # Check the calls
+        calls = consumer.channel.queue_declare.call_args_list
+
+        # First call should be for the input queue
+        assert calls[0][1] == {'queue': 'sical_queue.arqueo', 'durable': True}
+
+        # Second call should be for the results queue
+        assert calls[1][1] == {'queue': 'sical_results', 'durable': True}
 
     @pytest.mark.integration
     def test_qos_configuration(self, mock_rabbitmq_connection):
@@ -128,11 +134,11 @@ class TestCallback:
             delivery_tag=mock_rabbitmq_method.delivery_tag
         )
 
-        # Verify response was published
+        # Verify response was published to sical_results queue
         consumer.channel.basic_publish.assert_called_once()
         publish_call = consumer.channel.basic_publish.call_args
 
-        assert publish_call[1]['routing_key'] == mock_rabbitmq_properties.reply_to
+        assert publish_call[1]['routing_key'] == 'sical_results'
         assert publish_call[1]['properties'].correlation_id == mock_rabbitmq_properties.correlation_id
 
     @pytest.mark.integration
