@@ -4,11 +4,20 @@ import pika
 import json
 import dataclasses
 import logging
-from typing import Optional
+from typing import Optional, Callable
 from config import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
 from arqueo_tasks import OperationEncoder, operacion_arqueo
 
 logger = logging.getLogger(__name__)
+
+# Optional status callback for GUI integration
+STATUS_CALLBACK: Optional[Callable] = None
+
+
+def set_status_callback(callback: Optional[Callable] = None):
+    """Set the status callback function for GUI integration."""
+    global STATUS_CALLBACK
+    STATUS_CALLBACK = callback
 
 
 class ArqueoConsumer:
@@ -21,6 +30,9 @@ class ArqueoConsumer:
     def setup_connection(self):
         """Establish connection to RabbitMQ"""
         try:
+            if STATUS_CALLBACK:
+                STATUS_CALLBACK('connecting')
+
             credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
             self.connection = pika.BlockingConnection(
                 pika.ConnectionParameters(
@@ -33,7 +45,7 @@ class ArqueoConsumer:
                 )
             )
             self.channel = self.connection.channel()
-            
+
             # Declare the queue we'll consume from
             self.channel.queue_declare(
                 queue=self.queue_name,
@@ -49,9 +61,14 @@ class ArqueoConsumer:
             # Set QoS to handle one message at a time
             self.channel.basic_qos(prefetch_count=1)
             logger.info("RabbitMQ connection established successfully")
-            
+
+            if STATUS_CALLBACK:
+                STATUS_CALLBACK('connected')
+
         except Exception as e:
             logger.error(f"Failed to connect to RabbitMQ: {e}")
+            if STATUS_CALLBACK:
+                STATUS_CALLBACK('disconnected')
             raise
 
     def callback(self, ch, method, properties, body):
@@ -60,22 +77,41 @@ class ArqueoConsumer:
         This is called automatically by pika for each message received.
         """
         logger.info(f"Received message with correlation_id: {properties.correlation_id}")
-        
+
+        task_id = None
         try:
             # Parse the incoming message
             data = json.loads(body)
             logger.info(f"Message content: {data}")
+
+            task_id = data.get('task_id', 'unknown')
+
+            # Notify GUI: task received
+            if STATUS_CALLBACK:
+                STATUS_CALLBACK('task_received', task_id=task_id)
+
+            # Extract operation details for GUI
+            operation = data.get('operation_data', {}).get('operation', {})
+            operation_number = operation.get('num_operacion')
+            total_amount = operation.get('totalOperacion')
+
+            # Notify GUI: task started
+            if STATUS_CALLBACK:
+                STATUS_CALLBACK('task_started', task_id=task_id,
+                              operation_number=operation_number,
+                              amount=total_amount)
+
             # Process the arqueo operation
             result = operacion_arqueo(data['operation_data']['operation'])
-            
+
             logger.info(f"RESULTADO OPERACIÓN ARQUEO.......: {result}")
             # Prepare response
             response = {
                 'status': result.status.value,
-                'operation_id': data.get('task_id'),
+                'operation_id': task_id,
                 'result': dataclasses.asdict(result)
             }
-            
+
             # Send response back through RabbitMQ to sical_results queue
             ch.basic_publish(
                 exchange='',
@@ -86,15 +122,23 @@ class ArqueoConsumer:
 
                 body=json.dumps(response, cls=OperationEncoder)
             )
-            
+
             # Acknowledge the message was processed successfully
             ch.basic_ack(delivery_tag=method.delivery_tag)
             logger.info(f"Successfully processed message {properties.correlation_id}")
-            
+
+            # Notify GUI: task completed
+            if STATUS_CALLBACK:
+                STATUS_CALLBACK('task_completed', task_id=task_id)
+
         except Exception as e:
             logger.exception(f"Error processing message: {e}")
             # Negative acknowledgment - message will be requeued
             ch.basic_nack(delivery_tag=method.delivery_tag)
+
+            # Notify GUI: task failed
+            if STATUS_CALLBACK and task_id:
+                STATUS_CALLBACK('task_failed', task_id=task_id)
 
     def start_consuming(self):
         """Start consuming messages from the queue"""
@@ -126,5 +170,17 @@ class ArqueoConsumer:
             if self.connection and not self.connection.is_closed:
                 self.connection.close()
             logger.info("Successfully shut down consumer")
+
+            if STATUS_CALLBACK:
+                STATUS_CALLBACK('disconnected')
+
         except Exception as e:
             logger.error(f"Error while shutting down: {e}")
+
+    def start(self):
+        """Convenience method to start the consumer (alias for start_consuming)"""
+        self.start_consuming()
+
+    def stop(self):
+        """Convenience method to stop the consumer (alias for stop_consuming)"""
+        self.stop_consuming()

@@ -7,11 +7,20 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 
 # Third-party imports
 from robocorp import windows
 from robocorp.tasks import task
+
+# Optional task callback for GUI integration (progress updates)
+TASK_CALLBACK: Optional[Callable] = None
+
+
+def set_task_callback(callback: Optional[Callable] = None):
+    """Set the task callback function for GUI integration."""
+    global TASK_CALLBACK
+    TASK_CALLBACK = callback
 
 
 ###########
@@ -137,28 +146,42 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
     )
     
     window_manager = SicalWindowManager()
-    
+
     try:
         # Prepare operation data
+        if TASK_CALLBACK:
+            TASK_CALLBACK('step', step='Preparing operation data')
+
         datos_arqueo = create_arqueo_data(operation_data)
         arqueo_logger.debug('Created arqueo data: %s', datos_arqueo)
+
         # Setup SICAL window
+        if TASK_CALLBACK:
+            TASK_CALLBACK('step', step='Opening SICAL window')
+
         if not setup_sical_window(window_manager):
             result.status = OperationStatus.FAILED
             result.error = "Failed to open SICAL window"
             return result
-        else: 
+        else:
             result.sical_is_open = True
             result.status = OperationStatus.IN_PROGRESS
-        
+
         # Process operation
+        if TASK_CALLBACK:
+            TASK_CALLBACK('step', step='Processing arqueo operation')
+
         result = process_arqueo_operation(window_manager.ventana_arqueo, datos_arqueo, result)
-        
+
         if result.status == OperationStatus.COMPLETED:
             # Validate and finalize
+            if TASK_CALLBACK:
+                TASK_CALLBACK('step', step='Validating operation')
             ##result = validate_operation(window_manager.ventana_arqueo, result)
             pass
             if result.status == OperationStatus.COMPLETED:
+                if TASK_CALLBACK:
+                    TASK_CALLBACK('step', step='Finalizing operation')
                 ## result = print_operation_document(window_manager.ventana_arqueo, result)
                 pass
 
