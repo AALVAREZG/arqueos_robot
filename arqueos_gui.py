@@ -34,7 +34,7 @@ class ArqueosGUI:
         """Initialize the GUI."""
         self.root = root
         self.root.title("SICAL Arqueos Robot - Status Monitor")
-        self.root.geometry("800x700")
+        self.root.geometry("900x850")
         self.root.resizable(True, True)
 
         # Consumer thread reference
@@ -203,34 +203,97 @@ class ArqueosGUI:
         task_frame = ttk.LabelFrame(parent, text="🔄 Current Task", padding="10")
         task_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
+        # Configure grid columns for better layout
+        task_frame.columnconfigure(1, weight=1)
+        task_frame.columnconfigure(3, weight=1)
+
         # Task info labels
         self.current_task_label = ttk.Label(
             task_frame,
             text="No task currently processing",
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 9, "bold"),
             foreground="gray"
         )
-        self.current_task_label.grid(row=0, column=0, sticky=tk.W, columnspan=2)
+        self.current_task_label.grid(row=0, column=0, sticky=tk.W, columnspan=4, pady=(0, 5))
 
-        # Operation number
-        ttk.Label(task_frame, text="Operation:").grid(row=1, column=0, sticky=tk.W)
+        # Row 1: Operation number and Date
+        ttk.Label(task_frame, text="Operation:", font=("Segoe UI", 9)).grid(
+            row=1, column=0, sticky=tk.W
+        )
         self.operation_label = ttk.Label(task_frame, text="--")
-        self.operation_label.grid(row=1, column=1, sticky=tk.W, padx=5)
+        self.operation_label.grid(row=1, column=1, sticky=tk.W, padx=(5, 15))
 
-        # Duration
-        ttk.Label(task_frame, text="Duration:").grid(row=2, column=0, sticky=tk.W)
+        ttk.Label(task_frame, text="Date:", font=("Segoe UI", 9)).grid(
+            row=1, column=2, sticky=tk.W
+        )
+        self.date_label = ttk.Label(task_frame, text="--")
+        self.date_label.grid(row=1, column=3, sticky=tk.W, padx=5)
+
+        # Row 2: Duration and Cash Register
+        ttk.Label(task_frame, text="Duration:", font=("Segoe UI", 9)).grid(
+            row=2, column=0, sticky=tk.W
+        )
         self.duration_label = ttk.Label(task_frame, text="--")
-        self.duration_label.grid(row=2, column=1, sticky=tk.W, padx=5)
+        self.duration_label.grid(row=2, column=1, sticky=tk.W, padx=(5, 15))
 
-        # Amount
-        ttk.Label(task_frame, text="Amount:").grid(row=3, column=0, sticky=tk.W)
+        ttk.Label(task_frame, text="Cash Register:", font=("Segoe UI", 9)).grid(
+            row=2, column=2, sticky=tk.W
+        )
+        self.cash_register_label = ttk.Label(task_frame, text="--")
+        self.cash_register_label.grid(row=2, column=3, sticky=tk.W, padx=5)
+
+        # Row 3: Amount and Nature
+        ttk.Label(task_frame, text="Amount:", font=("Segoe UI", 9)).grid(
+            row=3, column=0, sticky=tk.W
+        )
         self.amount_label = ttk.Label(task_frame, text="--")
-        self.amount_label.grid(row=3, column=1, sticky=tk.W, padx=5)
+        self.amount_label.grid(row=3, column=1, sticky=tk.W, padx=(5, 15))
 
-        # Current step
-        ttk.Label(task_frame, text="Step:").grid(row=4, column=0, sticky=tk.W)
-        self.step_label = ttk.Label(task_frame, text="--", wraplength=600)
-        self.step_label.grid(row=4, column=1, sticky=tk.W, padx=5)
+        ttk.Label(task_frame, text="Type:", font=("Segoe UI", 9)).grid(
+            row=3, column=2, sticky=tk.W
+        )
+        self.nature_label = ttk.Label(task_frame, text="--")
+        self.nature_label.grid(row=3, column=3, sticky=tk.W, padx=5)
+
+        # Row 4: Third Party (full width)
+        ttk.Label(task_frame, text="Third Party:", font=("Segoe UI", 9)).grid(
+            row=4, column=0, sticky=tk.W
+        )
+        self.third_party_label = ttk.Label(task_frame, text="--", wraplength=600)
+        self.third_party_label.grid(row=4, column=1, sticky=tk.W, columnspan=3, padx=5)
+
+        # Row 5: Description (full width)
+        ttk.Label(task_frame, text="Description:", font=("Segoe UI", 9)).grid(
+            row=5, column=0, sticky=tk.W
+        )
+        self.description_label = ttk.Label(task_frame, text="--", wraplength=600)
+        self.description_label.grid(row=5, column=1, sticky=tk.W, columnspan=3, padx=5)
+
+        # Separator
+        ttk.Separator(task_frame, orient='horizontal').grid(
+            row=6, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=8
+        )
+
+        # Row 7: Line items progress
+        ttk.Label(task_frame, text="Line Items:", font=("Segoe UI", 9, "bold")).grid(
+            row=7, column=0, sticky=tk.W
+        )
+        self.line_items_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 9))
+        self.line_items_label.grid(row=7, column=1, sticky=tk.W, columnspan=3, padx=5)
+
+        # Row 8: Current line item details
+        ttk.Label(task_frame, text="Current Item:", font=("Segoe UI", 9)).grid(
+            row=8, column=0, sticky=tk.W
+        )
+        self.line_item_details_label = ttk.Label(task_frame, text="--", wraplength=600)
+        self.line_item_details_label.grid(row=8, column=1, sticky=tk.W, columnspan=3, padx=5)
+
+        # Row 9: Current step
+        ttk.Label(task_frame, text="Status:", font=("Segoe UI", 9)).grid(
+            row=9, column=0, sticky=tk.W
+        )
+        self.step_label = ttk.Label(task_frame, text="--", wraplength=600, foreground="blue")
+        self.step_label.grid(row=9, column=1, sticky=tk.W, columnspan=3, padx=5)
 
     def create_control_panel(self, parent):
         """Create the control buttons panel."""
@@ -438,19 +501,51 @@ class ArqueosGUI:
                 foreground="blue"
             )
 
+            # Basic info
             operation = current_task['operation_number'] or "--"
             self.operation_label.config(text=operation)
+
+            date = current_task.get('date') or "--"
+            self.date_label.config(text=date)
 
             duration = current_task['duration']
             minutes = int(duration // 60)
             seconds = int(duration % 60)
             self.duration_label.config(text=f"{minutes:02d}:{seconds:02d}")
 
+            cash_register = current_task.get('cash_register') or "--"
+            self.cash_register_label.config(text=cash_register)
+
             amount = current_task['amount']
             if amount is not None:
                 self.amount_label.config(text=f"€{amount:.2f}")
             else:
                 self.amount_label.config(text="--")
+
+            nature_display = current_task.get('nature_display') or "--"
+            self.nature_label.config(text=nature_display)
+
+            # Detailed info
+            third_party = current_task.get('third_party') or "--"
+            self.third_party_label.config(text=third_party)
+
+            description = current_task.get('description') or "--"
+            self.description_label.config(text=description)
+
+            # Line items progress
+            total_items = current_task.get('total_line_items', 0)
+            current_item = current_task.get('current_line_item', 0)
+            if total_items > 0:
+                progress_text = f"{current_item} of {total_items}"
+                if current_item > 0:
+                    percentage = (current_item / total_items) * 100
+                    progress_text += f" ({percentage:.0f}%)"
+                self.line_items_label.config(text=progress_text)
+            else:
+                self.line_items_label.config(text="--")
+
+            line_details = current_task.get('line_item_details') or "--"
+            self.line_item_details_label.config(text=line_details)
 
             step = current_task['current_step'] or "Processing..."
             self.step_label.config(text=step)
@@ -460,8 +555,15 @@ class ArqueosGUI:
                 foreground="gray"
             )
             self.operation_label.config(text="--")
+            self.date_label.config(text="--")
             self.duration_label.config(text="--")
+            self.cash_register_label.config(text="--")
             self.amount_label.config(text="--")
+            self.nature_label.config(text="--")
+            self.third_party_label.config(text="--")
+            self.description_label.config(text="--")
+            self.line_items_label.config(text="--")
+            self.line_item_details_label.config(text="--")
             self.step_label.config(text="--")
 
         # Update logs

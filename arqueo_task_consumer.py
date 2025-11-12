@@ -95,11 +95,28 @@ class ArqueoConsumer:
             operation_number = operation.get('num_operacion')
             total_amount = operation.get('totalOperacion')
 
-            # Notify GUI: task started
+            # Extract additional details
+            fecha = operation.get('fecha')
+            caja = operation.get('caja')
+            expediente = operation.get('expediente', 'rbt-apunte-arqueo')
+            tercero = operation.get('tercero')
+            naturaleza = operation.get('naturaleza', '4')
+            resumen = operation.get('texto_sical', [{}])[0].get('tcargo') if operation.get('texto_sical') else None
+            aplicaciones = operation.get('aplicaciones', [])
+            total_line_items = len(aplicaciones)
+
+            # Notify GUI: task started with full details
             if STATUS_CALLBACK:
                 STATUS_CALLBACK('task_started', task_id=task_id,
                               operation_number=operation_number,
-                              amount=total_amount)
+                              amount=total_amount,
+                              date=fecha,
+                              cash_register=caja,
+                              file_reference=expediente,
+                              third_party=tercero,
+                              nature=naturaleza,
+                              description=resumen,
+                              total_line_items=total_line_items)
 
             # Process the arqueo operation
             result = operacion_arqueo(data['operation_data']['operation'])

@@ -21,9 +21,28 @@ class TaskInfo:
     status: str = "processing"
     current_step: str = ""
 
+    # Additional detailed information
+    date: Optional[str] = None  # fecha
+    cash_register: Optional[str] = None  # caja
+    file_reference: Optional[str] = None  # expediente
+    third_party: Optional[str] = None  # tercero
+    nature: Optional[str] = None  # naturaleza (4=expenses, 5=income)
+    description: Optional[str] = None  # resumen
+    total_line_items: int = 0  # Total number of aplicaciones
+    current_line_item: int = 0  # Current line item being processed
+    line_item_details: Optional[str] = None  # Current line item description
+
     def duration(self) -> float:
         """Returns the duration in seconds since task started."""
         return (datetime.now() - self.start_time).total_seconds()
+
+    def nature_display(self) -> str:
+        """Returns a human-readable nature label."""
+        if self.nature == '4':
+            return "💸 Expenses (Gastos)"
+        elif self.nature == '5':
+            return "💰 Income (Ingresos)"
+        return "Unknown"
 
 
 class StatusManager:
@@ -94,7 +113,7 @@ class StatusManager:
             self.stats['pending'] += 1
 
     def task_started(self, task_id: str, operation_number: Optional[str] = None,
-                     amount: Optional[float] = None):
+                     amount: Optional[float] = None, **kwargs):
         """Called when a task starts processing."""
         with self._data_lock:
             if self.stats['pending'] > 0:
@@ -105,14 +124,27 @@ class StatusManager:
                 task_id=task_id,
                 operation_number=operation_number,
                 amount=amount,
-                start_time=datetime.now()
+                start_time=datetime.now(),
+                date=kwargs.get('date'),
+                cash_register=kwargs.get('cash_register'),
+                file_reference=kwargs.get('file_reference'),
+                third_party=kwargs.get('third_party'),
+                nature=kwargs.get('nature'),
+                description=kwargs.get('description'),
+                total_line_items=kwargs.get('total_line_items', 0)
             )
 
-    def task_progress(self, step: str):
+    def task_progress(self, step: str, **kwargs):
         """Update the current step of the task being processed."""
         with self._data_lock:
             if self.current_task:
                 self.current_task.current_step = step
+
+                # Update line item progress if provided
+                if 'current_line_item' in kwargs:
+                    self.current_task.current_line_item = kwargs['current_line_item']
+                if 'line_item_details' in kwargs:
+                    self.current_task.line_item_details = kwargs['line_item_details']
 
     def task_completed(self, task_id: str, success: bool = True):
         """Called when a task completes (success or failure)."""
@@ -162,7 +194,17 @@ class StatusManager:
                     'operation_number': self.current_task.operation_number,
                     'amount': self.current_task.amount,
                     'duration': self.current_task.duration(),
-                    'current_step': self.current_task.current_step
+                    'current_step': self.current_task.current_step,
+                    'date': self.current_task.date,
+                    'cash_register': self.current_task.cash_register,
+                    'file_reference': self.current_task.file_reference,
+                    'third_party': self.current_task.third_party,
+                    'nature': self.current_task.nature,
+                    'nature_display': self.current_task.nature_display(),
+                    'description': self.current_task.description,
+                    'total_line_items': self.current_task.total_line_items,
+                    'current_line_item': self.current_task.current_line_item,
+                    'line_item_details': self.current_task.line_item_details
                 }
 
             # Calculate session uptime

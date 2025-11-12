@@ -428,6 +428,16 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
 
             arqueo_logger.info(f"APLICACION debug: {aplicacion} ")
 
+            # Report progress to GUI
+            if TASK_CALLBACK:
+                partida = aplicacion.get("partida", "N/A")
+                importe = aplicacion.get("importe", "0.00")
+                line_details = f"Budget: {partida}, Amount: €{importe}"
+                TASK_CALLBACK('step',
+                            step=f'Processing line item {i+1} of {len(datos_arqueo["aplicaciones"])}',
+                            current_line_item=i+1,
+                            line_item_details=line_details)
+
             if (float(aplicacion["importe"].replace(",", ".")) > 0.0):  
                 # si el importe de la partida es mayor que cero
                 
