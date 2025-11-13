@@ -27,6 +27,9 @@ This robot automates complex financial workflows by:
 - ✅ **Validation & Reconciliation** - Automatic amount verification
 - 📝 **Comprehensive Logging** - Detailed operation tracking
 - 🧪 **Tested** - Comprehensive test suite with >80% coverage
+- 🎨 **GUI Status Monitor** - Real-time monitoring with tabbed interface
+- 📜 **Task History** - SQLite database with complete audit trail
+- 📤 **Export Capabilities** - Export to Excel, JSON, and CSV
 
 ## Prerequisites
 
@@ -90,7 +93,30 @@ RABBITMQ_PASS=your_password
 
 ### Starting the Robot
 
-Run the main consumer to start listening for messages:
+The robot can run in two modes:
+
+#### GUI Mode (Recommended)
+
+Run with graphical interface for monitoring and control:
+
+```bash
+python arqueos_gui.py
+# or
+python run_gui.py
+```
+
+Features:
+- Real-time monitoring dashboard
+- Service control (start/stop)
+- Complete task history with search
+- Export capabilities (Excel, JSON, CSV)
+- Visual task progress tracking
+
+See [GUI Status Monitor](#gui-status-monitor) section for detailed documentation.
+
+#### CLI Mode (Headless)
+
+Run without GUI for server deployments:
 
 ```bash
 python main.py
@@ -101,6 +127,7 @@ The robot will:
 2. Listen on the `sical_queue.arqueo` queue
 3. Process incoming arqueo operations
 4. Send results back to the reply queue
+5. Log to console/file
 
 ### Message Format
 
@@ -364,14 +391,281 @@ The robot sends responses to the `sical_results` queue:
 
 For detailed migration information, see [docs/MIGRATION_VERIFICATION_REPORT.md](docs/MIGRATION_VERIFICATION_REPORT.md) and [docs/RESULT_QUEUE_CHANGE.md](docs/RESULT_QUEUE_CHANGE.md).
 
+## GUI Status Monitor
+
+The robot includes a comprehensive GUI for real-time monitoring and historical task analysis. The GUI provides a user-friendly interface for managing the service, viewing task progress, and analyzing historical data.
+
+### GUI Features
+
+- 📊 **Real-time Monitoring** - Live service status and task progress
+- 📜 **Complete Task History** - SQLite-based persistent storage from day zero
+- 🔍 **Search & Filter** - Find tasks by ID, operation, third party, or status
+- 📤 **Export Capabilities** - Export history to Excel, JSON, or CSV
+- 📈 **Statistics Dashboard** - Overall metrics and success rates
+- 🎯 **Detailed Task View** - Complete task information on double-click
+
+### Running the GUI
+
+#### Standard Launch
+
+```bash
+# Using the main GUI script
+python arqueos_gui.py
+
+# Or using the convenience launcher
+python run_gui.py
+```
+
+The GUI window will open automatically. From there, you can:
+1. Click **"▶ Start Service"** to begin processing tasks
+2. Monitor real-time task execution in the Monitor tab
+3. View historical tasks in the History tab
+4. Stop the service with **"⏹ Stop Service"**
+
+### GUI Architecture
+
+The GUI uses a **minimal wrapper approach** with callback hooks:
+- **Non-invasive**: Only ~60 lines added to existing code
+- **Thread-safe**: Separate GUI and worker threads with proper synchronization
+- **Status Manager**: Centralized state management singleton
+- **Database Persistence**: Automatic SQLite logging of all tasks
+
+### GUI Tabs
+
+#### 📊 Monitor Tab
+
+Real-time monitoring of the robot service:
+
+**Service Status Panel:**
+- Service running/stopped indicator
+- RabbitMQ connection status
+- Session uptime counter
+
+**Statistics Panel:**
+- Pending tasks count
+- Currently processing count
+- Completed tasks count
+- Failed tasks count
+- Success rate percentage
+
+**Current Task Panel:**
+Shows detailed information about the task being processed:
+- Task ID and operation number
+- Date, cash register, third party
+- Operation type (Income/Expenses)
+- Amount and description
+- Line items progress with percentage
+- Current processing step
+
+**Activity Log:**
+- Real-time log messages with color coding
+- INFO (black), WARNING (orange), ERROR (red), DEBUG (gray)
+- Automatic scrolling to latest messages
+- Last 50 messages displayed
+
+**Control Buttons:**
+- Start Service: Begin processing tasks from queue
+- Stop Service: Gracefully stop the consumer
+- Clear Stats: Reset session statistics
+
+#### 📜 History Tab
+
+Complete historical task database with search and export:
+
+**Search & Filter Panel:**
+- Search box: Find by task ID, operation, or third party
+- Status filter: All / Completed / Failed / Error
+- Refresh button: Reload latest data
+
+**Overall Statistics:**
+- Total tasks processed since day zero
+- Completed count (green)
+- Failed count (red)
+- Average task duration
+
+**Task History Table:**
+Sortable table with the following columns:
+- Task ID
+- Date
+- Operation Number
+- Amount
+- Cash Register
+- Third Party
+- Type (Income/Expenses)
+- Status (color-coded)
+- Duration (mm:ss)
+- Completed At
+
+**Features:**
+- Most recent tasks displayed first
+- Color-coded rows (green=completed, red=failed)
+- Double-click any row to view full details
+- Horizontal and vertical scrolling
+
+**Task Details Window:**
+Double-clicking a row opens a popup with complete task information:
+- Task identification (ID, operation number, status)
+- Operation details (date, cash register, third party, nature, amount, description)
+- Timing information (started at, completed at, duration)
+- Error messages (if task failed)
+- All data formatted for easy reading
+
+**Export Panel:**
+Export complete history to various formats:
+- **📊 Excel (.xlsx)**: Formatted spreadsheet with headers and auto-sized columns
+- **📄 JSON**: Machine-readable format for data processing
+- **📋 CSV**: Comma-separated values for spreadsheet import
+
+### Database Persistence
+
+The GUI automatically maintains a complete audit trail:
+
+**Database File:** `arqueos_history.db` (created automatically)
+
+**Stored Information:**
+- Task ID, operation number, amount
+- Date, cash register, third party, nature
+- Description and line item count
+- Status (completed/failed/error)
+- Start time, completion time, duration
+- Error messages for failed tasks
+- Raw data backup (JSON)
+
+**Benefits:**
+- ✅ Zero-configuration persistence
+- ✅ Data survives service restarts
+- ✅ Complete audit trail from day zero
+- ✅ Fast search and retrieval
+- ✅ Easy backup (single file)
+- ✅ No external database server required
+
+**Backup Strategy:**
+Simply copy `arqueos_history.db` to backup location:
+```bash
+# Backup database
+cp arqueos_history.db backups/arqueos_history_$(date +%Y%m%d).db
+
+# Restore from backup
+cp backups/arqueos_history_20241213.db arqueos_history.db
+```
+
+### Export Functionality
+
+#### Excel Export
+
+Creates a formatted `.xlsx` file with:
+- Header row with bold formatting
+- Auto-sized columns
+- All task details
+- Professional appearance
+
+**Requirements:**
+```bash
+pip install openpyxl
+```
+
+**Usage:**
+1. Go to History tab
+2. Click **"📊 Excel (.xlsx)"**
+3. Choose save location
+4. Open in Excel, LibreOffice, or Google Sheets
+
+#### JSON Export
+
+Creates a machine-readable JSON file:
+- Array of task objects
+- ISO 8601 timestamps
+- Suitable for data processing scripts
+- Can be imported into other systems
+
+**No additional dependencies required.**
+
+#### CSV Export
+
+Creates a comma-separated values file:
+- Compatible with all spreadsheet applications
+- Can be imported into databases
+- Simple text format
+
+**No additional dependencies required.**
+
+### GUI Requirements
+
+**Core Requirements (included in requirements.txt):**
+- `tkinter` - GUI framework (included with Python)
+- `sqlite3` - Database (included with Python)
+
+**Optional Requirements:**
+```bash
+# For Excel export functionality
+pip install openpyxl
+```
+
+**Note:** JSON and CSV export work without additional dependencies.
+
+### Packaging for Distribution
+
+The GUI can be packaged as a standalone Windows executable:
+
+```bash
+# Install PyInstaller
+pip install pyinstaller
+
+# Create standalone executable
+pyinstaller --onefile --windowed --name="ArqueosRobot" arqueos_gui.py
+
+# Executable will be in dist/ArqueosRobot.exe
+```
+
+**Advantages for distribution:**
+- Single `.exe` file - no Python installation required
+- Professional Windows application
+- Includes all dependencies
+- Easy deployment to municipal staff
+- No command-line knowledge needed
+
+### GUI Files
+
+The GUI implementation consists of:
+- `arqueos_gui.py` (1,100+ lines) - Main GUI application with tabbed interface
+- `status_manager.py` (260 lines) - Thread-safe state manager with DB persistence
+- `task_history_db.py` (400+ lines) - SQLite database manager with export functions
+- `run_gui.py` (10 lines) - Convenience launcher script
+
+### Troubleshooting GUI
+
+**GUI doesn't show task data:**
+- Check that SICAL application is running
+- Verify tasks are being received from RabbitMQ
+- Check Activity Log for error messages
+
+**History tab is empty:**
+- Click "🔄 Refresh" button
+- Ensure tasks have been processed (check Monitor tab first)
+- Database file `arqueos_history.db` should exist in project root
+
+**Excel export fails:**
+- Install openpyxl: `pip install openpyxl`
+- Use JSON or CSV export as alternative
+
+**Service won't start:**
+- Check RabbitMQ connection settings in `.env`
+- Verify RabbitMQ server is running
+- Check Activity Log for connection errors
+
 ## Project Structure
 
 ```
 arqueos_robot/
-├── main.py                      # Entry point
+├── main.py                      # Entry point (CLI mode)
 ├── arqueo_tasks.py              # Core business logic (559 lines)
-├── arqueo_task_consumer.py      # RabbitMQ consumer (123 lines)
+├── arqueo_task_consumer.py      # RabbitMQ consumer (170 lines)
 ├── config.py                    # Configuration management
+├── arqueos_gui.py               # GUI application (1,100+ lines)
+├── status_manager.py            # Thread-safe state manager (260 lines)
+├── task_history_db.py           # SQLite database manager (400+ lines)
+├── run_gui.py                   # GUI launcher
+├── arqueos_history.db           # Task history database (auto-created)
 ├── requirements.txt             # Python dependencies
 ├── conda.yaml                   # Conda environment specification
 ├── robot.yaml                   # Robocorp configuration
@@ -557,17 +851,17 @@ External Service
 - ⚠️ Validation function not yet implemented (commented out)
 - ⚠️ Print document function incomplete
 - ⚠️ Window cleanup disabled during development
-- ⚠️ No file-based audit trail implemented
 
 ## Roadmap
 
+- [x] ~~Add file-based audit trail~~ **COMPLETED** (SQLite database with GUI)
+- [x] ~~Implement monitoring/metrics~~ **COMPLETED** (GUI status monitor)
 - [ ] Complete validation implementation
 - [ ] Implement document printing
-- [ ] Add file-based operation backup
 - [ ] Extract hardcoded partida mapping to config file
 - [ ] Add Docker support
-- [ ] Implement monitoring/metrics
 - [ ] Add retry mechanisms for transient failures
+- [ ] Add automated report generation from history database
 
 ## License
 
@@ -591,5 +885,24 @@ For issues, questions, or contributions:
 
 ---
 
-**Version**: 1.5
+**Version**: 2.0 (GUI Release)
 **Last Updated**: December 2024
+
+## Changelog
+
+### Version 2.0 - GUI Release (December 2024)
+- ✨ Added comprehensive GUI with tabbed interface (Monitor + History)
+- 📊 Real-time task monitoring with detailed progress tracking
+- 📜 Complete task history with SQLite database persistence
+- 🔍 Search and filter capabilities for historical tasks
+- 📤 Export functionality (Excel, JSON, CSV)
+- 📈 Statistics dashboard with success rates and metrics
+- 🎯 Detailed task view with double-click popup
+- 🗄️ Zero-configuration SQLite database for audit trail
+- 🧵 Thread-safe architecture with callback hooks
+- 🐛 Fixed task detail formatting errors with None values
+
+### Version 1.5 (November 2024)
+- Updated message format to new structure with `aplicaciones`
+- Deprecated old `final` array format
+- Improved error handling and logging
