@@ -107,34 +107,33 @@ class ArqueoConsumer:
             # Extract operation details for GUI (with safe access)
             operation = data.get('operation_data', {}).get('operation', {})
 
-            # DEBUG: Log what keys are in the operation dict
+            # The actual operation data is inside 'detalle'
+            detalle = operation.get('detalle', {})
+
+            # DEBUG: Log what we found
             if STATUS_CALLBACK:
                 from status_manager import status_manager
                 status_manager.add_log(f"CONSUMER: operation dict keys: {list(operation.keys())}", "DEBUG")
+                status_manager.add_log(f"CONSUMER: detalle keys: {list(detalle.keys())}", "DEBUG")
 
-                # Check if operation data is in 'detalle' or 'result'
-                if 'detalle' in operation and isinstance(operation['detalle'], dict):
-                    status_manager.add_log(f"CONSUMER: detalle keys: {list(operation['detalle'].keys())}", "DEBUG")
-                if 'result' in operation and isinstance(operation['result'], dict):
-                    status_manager.add_log(f"CONSUMER: result keys: {list(operation['result'].keys())}", "DEBUG")
+            # Extract from detalle where the actual data is
+            operation_number = detalle.get('num_operacion')
+            total_amount = detalle.get('totalOperacion')
 
-            operation_number = operation.get('num_operacion')
-            total_amount = operation.get('totalOperacion')
-
-            # Extract additional details safely
-            fecha = operation.get('fecha')
-            caja = operation.get('caja')
-            expediente = operation.get('expediente', 'rbt-apunte-arqueo')
-            tercero = operation.get('tercero')
-            naturaleza = operation.get('naturaleza', '4')
+            # Extract additional details from detalle
+            fecha = detalle.get('fecha')
+            caja = detalle.get('caja')
+            expediente = detalle.get('expediente', 'rbt-apunte-arqueo')
+            tercero = detalle.get('tercero')
+            naturaleza = detalle.get('naturaleza', '4')
 
             # Safely extract description from texto_sical
             resumen = None
-            texto_sical = operation.get('texto_sical', [])
+            texto_sical = detalle.get('texto_sical', [])
             if texto_sical and len(texto_sical) > 0 and isinstance(texto_sical[0], dict):
                 resumen = texto_sical[0].get('tcargo')
 
-            aplicaciones = operation.get('aplicaciones', [])
+            aplicaciones = detalle.get('aplicaciones', [])
             total_line_items = len(aplicaciones) if aplicaciones else 0
 
             logger.info(f"Extracted task details - Operation: {operation_number}, Amount: {total_amount}, "
