@@ -6,13 +6,14 @@ Provides real-time status updates, task monitoring, and service control.
 """
 
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, filedialog, messagebox
 import threading
 import logging
 from datetime import datetime
 from typing import Optional
 
 from status_manager import status_manager
+from task_history_db import get_task_history_db
 
 
 class LogHandler(logging.Handler):
@@ -75,7 +76,7 @@ class ArqueosGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(4, weight=1)  # Log panel expands
+        main_frame.rowconfigure(1, weight=1)  # Notebook expands
 
         # Title
         title_label = ttk.Label(
@@ -83,22 +84,244 @@ class ArqueosGUI:
             text="SICAL Arqueos Robot - Status Monitor",
             font=("Segoe UI", 14, "bold")
         )
-        title_label.grid(row=0, column=0, columnspan=2, pady=(0, 10))
+        title_label.grid(row=0, column=0, pady=(0, 10))
 
-        # Status Panel
-        self.create_status_panel(main_frame)
+        # Create notebook (tabbed interface)
+        self.notebook = ttk.Notebook(main_frame)
+        self.notebook.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+
+        # Create tabs
+        self.create_monitor_tab()
+        self.create_history_tab()
+
+    def create_monitor_tab(self):
+        """Create the Monitor tab with real-time status."""
+        # Create frame for monitor tab
+        monitor_frame = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(monitor_frame, text="📊 Monitor")
+
+        # Configure grid
+        monitor_frame.columnconfigure(0, weight=1)
+        monitor_frame.rowconfigure(4, weight=1)  # Log panel expands
+
+        # Add all existing panels
+        self.create_status_panel(monitor_frame)
+        self.create_statistics_panel(monitor_frame)
+        self.create_current_task_panel(monitor_frame)
+        self.create_control_panel(monitor_frame)
+        self.create_log_panel(monitor_frame)
+
+    def create_history_tab(self):
+        """Create the History tab with task history table."""
+        # Create frame for history tab
+        history_frame = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(history_frame, text="📜 History")
+
+        # Configure grid
+        history_frame.columnconfigure(0, weight=1)
+        history_frame.rowconfigure(2, weight=1)  # Table expands
+
+        # Search/Filter Panel
+        self.create_history_search_panel(history_frame)
 
         # Statistics Panel
-        self.create_statistics_panel(main_frame)
+        self.create_history_stats_panel(history_frame)
 
-        # Current Task Panel
-        self.create_current_task_panel(main_frame)
+        # History Table
+        self.create_history_table(history_frame)
 
-        # Control Buttons
-        self.create_control_panel(main_frame)
+        # Export Panel
+        self.create_export_panel(history_frame)
 
-        # Log Panel
-        self.create_log_panel(main_frame)
+    def create_history_search_panel(self, parent):
+        """Create search and filter controls for history."""
+        search_frame = ttk.LabelFrame(parent, text="🔍 Search & Filter", padding="10")
+        search_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+
+        # Search entry
+        ttk.Label(search_frame, text="Search:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.search_entry = ttk.Entry(search_frame, width=40)
+        self.search_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+
+        # Status filter
+        ttk.Label(search_frame, text="Status:").grid(row=0, column=2, sticky=tk.W, padx=(10, 5))
+        self.status_filter = ttk.Combobox(
+            search_frame,
+            values=["All", "Completed", "Failed", "Error"],
+            state="readonly",
+            width=15
+        )
+        self.status_filter.set("All")
+        self.status_filter.grid(row=0, column=3, sticky=tk.W, padx=(0, 10))
+
+        # Search button
+        search_btn = ttk.Button(
+            search_frame,
+            text="🔍 Search",
+            command=self.load_history,
+            width=12
+        )
+        search_btn.grid(row=0, column=4, padx=5)
+
+        # Refresh button
+        refresh_btn = ttk.Button(
+            search_frame,
+            text="🔄 Refresh",
+            command=self.load_history,
+            width=12
+        )
+        refresh_btn.grid(row=0, column=5, padx=5)
+
+        # Configure column weights
+        search_frame.columnconfigure(1, weight=1)
+
+    def create_history_stats_panel(self, parent):
+        """Create overall history statistics panel."""
+        stats_frame = ttk.LabelFrame(parent, text="📈 Overall Statistics", padding="10")
+        stats_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+
+        # Total tasks
+        ttk.Label(stats_frame, text="Total Tasks:", font=("Segoe UI", 9)).grid(
+            row=0, column=0, sticky=tk.W, padx=(0, 20)
+        )
+        self.hist_total_label = ttk.Label(
+            stats_frame,
+            text="0",
+            font=("Segoe UI", 10, "bold")
+        )
+        self.hist_total_label.grid(row=0, column=1, sticky=tk.W)
+
+        # Completed
+        ttk.Label(stats_frame, text="Completed:", font=("Segoe UI", 9)).grid(
+            row=0, column=2, sticky=tk.W, padx=(20, 5)
+        )
+        self.hist_completed_label = ttk.Label(
+            stats_frame,
+            text="0",
+            font=("Segoe UI", 10, "bold"),
+            foreground="green"
+        )
+        self.hist_completed_label.grid(row=0, column=3, sticky=tk.W, padx=(0, 20))
+
+        # Failed
+        ttk.Label(stats_frame, text="Failed:", font=("Segoe UI", 9)).grid(
+            row=0, column=4, sticky=tk.W, padx=(0, 5)
+        )
+        self.hist_failed_label = ttk.Label(
+            stats_frame,
+            text="0",
+            font=("Segoe UI", 10, "bold"),
+            foreground="red"
+        )
+        self.hist_failed_label.grid(row=0, column=5, sticky=tk.W, padx=(0, 20))
+
+        # Average duration
+        ttk.Label(stats_frame, text="Avg Duration:", font=("Segoe UI", 9)).grid(
+            row=0, column=6, sticky=tk.W, padx=(0, 5)
+        )
+        self.hist_avg_duration_label = ttk.Label(
+            stats_frame,
+            text="--",
+            font=("Segoe UI", 10, "bold")
+        )
+        self.hist_avg_duration_label.grid(row=0, column=7, sticky=tk.W)
+
+    def create_history_table(self, parent):
+        """Create the task history table."""
+        table_frame = ttk.LabelFrame(parent, text="📋 Task History", padding="5")
+        table_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+
+        # Create Treeview with scrollbars
+        tree_scroll_y = ttk.Scrollbar(table_frame, orient=tk.VERTICAL)
+        tree_scroll_x = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL)
+
+        self.history_tree = ttk.Treeview(
+            table_frame,
+            columns=("task_id", "date", "operation", "amount", "cash_register",
+                    "third_party", "nature", "status", "duration", "completed_at"),
+            show="headings",
+            yscrollcommand=tree_scroll_y.set,
+            xscrollcommand=tree_scroll_x.set,
+            height=15
+        )
+
+        tree_scroll_y.config(command=self.history_tree.yview)
+        tree_scroll_x.config(command=self.history_tree.xview)
+
+        # Define columns
+        self.history_tree.heading("task_id", text="Task ID")
+        self.history_tree.heading("date", text="Date")
+        self.history_tree.heading("operation", text="Operation")
+        self.history_tree.heading("amount", text="Amount")
+        self.history_tree.heading("cash_register", text="Cash Reg.")
+        self.history_tree.heading("third_party", text="Third Party")
+        self.history_tree.heading("nature", text="Type")
+        self.history_tree.heading("status", text="Status")
+        self.history_tree.heading("duration", text="Duration")
+        self.history_tree.heading("completed_at", text="Completed At")
+
+        # Column widths
+        self.history_tree.column("task_id", width=180, minwidth=100)
+        self.history_tree.column("date", width=100, minwidth=80)
+        self.history_tree.column("operation", width=100, minwidth=80)
+        self.history_tree.column("amount", width=100, minwidth=80)
+        self.history_tree.column("cash_register", width=80, minwidth=60)
+        self.history_tree.column("third_party", width=150, minwidth=100)
+        self.history_tree.column("nature", width=100, minwidth=80)
+        self.history_tree.column("status", width=90, minwidth=70)
+        self.history_tree.column("duration", width=80, minwidth=60)
+        self.history_tree.column("completed_at", width=150, minwidth=120)
+
+        # Grid layout
+        self.history_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        tree_scroll_y.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        tree_scroll_x.grid(row=1, column=0, sticky=(tk.W, tk.E))
+
+        # Configure grid weights
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.rowconfigure(0, weight=1)
+
+        # Bind double-click to view details
+        self.history_tree.bind("<Double-1>", self.on_history_row_double_click)
+
+        # Tag colors for status
+        self.history_tree.tag_configure("completed", foreground="green")
+        self.history_tree.tag_configure("failed", foreground="red")
+        self.history_tree.tag_configure("error", foreground="dark red")
+
+    def create_export_panel(self, parent):
+        """Create export buttons."""
+        export_frame = ttk.LabelFrame(parent, text="📤 Export", padding="10")
+        export_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        ttk.Label(export_frame, text="Export history to:").grid(row=0, column=0, padx=(0, 10))
+
+        # Excel export
+        excel_btn = ttk.Button(
+            export_frame,
+            text="📊 Excel (.xlsx)",
+            command=lambda: self.export_history("excel"),
+            width=15
+        )
+        excel_btn.grid(row=0, column=1, padx=5)
+
+        # JSON export
+        json_btn = ttk.Button(
+            export_frame,
+            text="📄 JSON",
+            command=lambda: self.export_history("json"),
+            width=15
+        )
+        json_btn.grid(row=0, column=2, padx=5)
+
+        # CSV export
+        csv_btn = ttk.Button(
+            export_frame,
+            text="📋 CSV",
+            command=lambda: self.export_history("csv"),
+            width=15
+        )
+        csv_btn.grid(row=0, column=3, padx=5)
 
     def create_status_panel(self, parent):
         """Create the service status panel."""
@@ -621,6 +844,242 @@ class ArqueosGUI:
 
         # Schedule next update (500ms)
         self.root.after(500, self.update_display)
+
+    def load_history(self):
+        """Load task history from database."""
+        try:
+            db = get_task_history_db()
+
+            # Get search term and status filter
+            search_term = self.search_entry.get().strip()
+            status_filter_value = self.status_filter.get()
+
+            # Map UI values to database values
+            status_map = {
+                "All": None,
+                "Completed": "completed",
+                "Failed": "failed",
+                "Error": "error"
+            }
+            status_db = status_map.get(status_filter_value)
+
+            # Get tasks from database
+            if search_term:
+                tasks = db.search_tasks(search_term, limit=500)
+                # Apply status filter if needed
+                if status_db:
+                    tasks = [t for t in tasks if t.get('status') == status_db]
+            else:
+                tasks = db.get_all_tasks(limit=500, status_filter=status_db)
+
+            # Clear existing items
+            for item in self.history_tree.get_children():
+                self.history_tree.delete(item)
+
+            # Populate tree
+            for task in tasks:
+                # Format values
+                task_id = task.get('task_id', '--')[:30]
+                date = task.get('date', '--')
+                operation = task.get('operation_number', '--')
+                amount = f"€{task.get('amount', 0):.2f}" if task.get('amount') else "--"
+                cash_reg = task.get('cash_register', '--')
+                third_party = (task.get('third_party', '--') or '--')[:25]
+
+                # Nature display
+                nature = task.get('nature')
+                if nature == '4':
+                    nature_display = "Expenses"
+                elif nature == '5':
+                    nature_display = "Income"
+                else:
+                    nature_display = nature or "--"
+
+                status = (task.get('status', '--') or '--').capitalize()
+
+                # Duration
+                duration_sec = task.get('duration_seconds')
+                if duration_sec:
+                    minutes = int(duration_sec // 60)
+                    seconds = int(duration_sec % 60)
+                    duration = f"{minutes:02d}:{seconds:02d}"
+                else:
+                    duration = "--"
+
+                # Completed at
+                completed_at = task.get('completed_at', '--')
+                if completed_at and completed_at != '--':
+                    try:
+                        # Format datetime if it's a timestamp
+                        if isinstance(completed_at, str):
+                            dt = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
+                            completed_at = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except:
+                        pass
+
+                # Insert with tag for coloring
+                tag = task.get('status', '').lower()
+                self.history_tree.insert(
+                    "",
+                    0,  # Insert at beginning (most recent first)
+                    values=(task_id, date, operation, amount, cash_reg,
+                           third_party, nature_display, status, duration, completed_at),
+                    tags=(tag,)
+                )
+
+            # Update statistics
+            stats = db.get_statistics()
+            self.hist_total_label.config(text=str(stats.get('total_tasks', 0)))
+            self.hist_completed_label.config(text=str(stats.get('completed', 0)))
+            self.hist_failed_label.config(text=str(stats.get('failed', 0)))
+
+            avg_duration = stats.get('avg_duration')
+            if avg_duration:
+                minutes = int(avg_duration // 60)
+                seconds = int(avg_duration % 60)
+                self.hist_avg_duration_label.config(text=f"{minutes:02d}:{seconds:02d}")
+            else:
+                self.hist_avg_duration_label.config(text="--")
+
+            status_manager.add_log(f"Loaded {len(tasks)} tasks from history", "INFO")
+
+        except Exception as e:
+            status_manager.add_log(f"Failed to load history: {e}", "ERROR")
+            messagebox.showerror("Error", f"Failed to load history:\n{e}")
+
+    def on_history_row_double_click(self, event):
+        """Handle double-click on history row to show details."""
+        selection = self.history_tree.selection()
+        if not selection:
+            return
+
+        # Get task_id from selected row
+        item = self.history_tree.item(selection[0])
+        task_id = item['values'][0]  # task_id is first column
+
+        try:
+            db = get_task_history_db()
+            # Search for full task (task_id might be truncated in display)
+            tasks = db.search_tasks(task_id, limit=1)
+            if not tasks:
+                messagebox.showinfo("Not Found", "Task details not found in database")
+                return
+
+            task = tasks[0]
+
+            # Create detail window
+            detail_window = tk.Toplevel(self.root)
+            detail_window.title(f"Task Details - {task.get('task_id', 'Unknown')}")
+            detail_window.geometry("600x500")
+
+            # Create scrolled text widget
+            text = scrolledtext.ScrolledText(
+                detail_window,
+                wrap=tk.WORD,
+                font=("Consolas", 10),
+                padx=10,
+                pady=10
+            )
+            text.pack(fill=tk.BOTH, expand=True)
+
+            # Pre-format complex values to avoid f-string issues
+            amount_str = f"€{task.get('amount'):.2f}" if task.get('amount') is not None else '--'
+            duration_str = '--'
+            if task.get('duration_seconds') is not None:
+                dur_sec = task.get('duration_seconds')
+                duration_str = f"{int(dur_sec // 60):02d}:{int(dur_sec % 60):02d}"
+
+            # Format task details
+            details = f"""
+╔═══════════════════════════════════════════════════════════════╗
+║                        TASK DETAILS                           ║
+╚═══════════════════════════════════════════════════════════════╝
+
+Task ID:          {task.get('task_id', '--')}
+Operation Number: {task.get('operation_number', '--')}
+Status:           {(task.get('status', '--') or '--').upper()}
+
+╔═══════════════════════════════════════════════════════════════╗
+║                     OPERATION DETAILS                         ║
+╚═══════════════════════════════════════════════════════════════╝
+
+Date:             {task.get('date', '--')}
+Cash Register:    {task.get('cash_register', '--')}
+Third Party:      {task.get('third_party', '--')}
+Nature:           {task.get('nature', '--')} ({'Expenses' if task.get('nature') == '4' else 'Income' if task.get('nature') == '5' else 'Unknown'})
+Amount:           {amount_str}
+Description:      {task.get('description', '--') or '--'}
+Total Line Items: {task.get('total_line_items', 0)}
+
+╔═══════════════════════════════════════════════════════════════╗
+║                      TIMING INFORMATION                       ║
+╚═══════════════════════════════════════════════════════════════╝
+
+Started At:       {task.get('started_at', '--')}
+Completed At:     {task.get('completed_at', '--')}
+Duration:         {duration_str}
+
+"""
+            # Add error message if present
+            if task.get('error_message'):
+                details += f"""╔═══════════════════════════════════════════════════════════════╗
+║                        ERROR MESSAGE                          ║
+╚═══════════════════════════════════════════════════════════════╝
+
+{task.get('error_message')}
+"""
+
+            text.insert("1.0", details)
+            text.config(state=tk.DISABLED)
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load task details:\n{e}")
+
+    def export_history(self, format_type):
+        """Export history to file."""
+        try:
+            db = get_task_history_db()
+
+            # File dialog
+            filetypes = {
+                "excel": [("Excel files", "*.xlsx"), ("All files", "*.*")],
+                "json": [("JSON files", "*.json"), ("All files", "*.*")],
+                "csv": [("CSV files", "*.csv"), ("All files", "*.*")]
+            }
+
+            default_ext = {
+                "excel": ".xlsx",
+                "json": ".json",
+                "csv": ".csv"
+            }
+
+            filepath = filedialog.asksaveasfilename(
+                title="Export History",
+                defaultextension=default_ext[format_type],
+                filetypes=filetypes[format_type]
+            )
+
+            if not filepath:
+                return  # User cancelled
+
+            # Export based on format
+            success = False
+            if format_type == "excel":
+                success = db.export_to_excel(filepath)
+            elif format_type == "json":
+                success = db.export_to_json(filepath)
+            elif format_type == "csv":
+                success = db.export_to_csv(filepath)
+
+            if success:
+                messagebox.showinfo("Success", f"History exported successfully to:\n{filepath}")
+                status_manager.add_log(f"Exported history to {filepath}", "INFO")
+            else:
+                messagebox.showerror("Error", "Export failed. Check logs for details.")
+
+        except Exception as e:
+            status_manager.add_log(f"Export failed: {e}", "ERROR")
+            messagebox.showerror("Error", f"Export failed:\n{e}")
 
     def on_closing(self):
         """Handle window closing event."""
