@@ -66,7 +66,8 @@ class StatusManager:
 
     def __init__(self):
         """Initialize the status manager (only once)."""
-        if self._initialized:
+        # Use getattr to safely check if already initialized
+        if getattr(self, '_initialized', False):
             return
 
         self._initialized = True
