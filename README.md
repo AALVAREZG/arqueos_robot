@@ -179,7 +179,7 @@ Send messages to the `sical_queue.arqueo` queue with the following structure:
 - `task_id`: Unique task identifier (used for tracking and logging)
 - `operation_data`: Container object for operation details
   - `operation`: Operation object containing type and details
-    - `tipo`: Operation type (always "arqueo" for this consumer)
+    - `tipo`: Operation type identifier (read from message, typically "arqueo")
     - `detalle`: Detailed operation data (see below)
 
 **Detalle fields (inside operation_data.operation.detalle):**
