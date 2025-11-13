@@ -982,6 +982,13 @@ class ArqueosGUI:
             )
             text.pack(fill=tk.BOTH, expand=True)
 
+            # Pre-format complex values to avoid f-string issues
+            amount_str = f"€{task.get('amount'):.2f}" if task.get('amount') is not None else '--'
+            duration_str = '--'
+            if task.get('duration_seconds') is not None:
+                dur_sec = task.get('duration_seconds')
+                duration_str = f"{int(dur_sec // 60):02d}:{int(dur_sec % 60):02d}"
+
             # Format task details
             details = f"""
 ╔═══════════════════════════════════════════════════════════════╗
@@ -1000,7 +1007,7 @@ Date:             {task.get('date', '--')}
 Cash Register:    {task.get('cash_register', '--')}
 Third Party:      {task.get('third_party', '--')}
 Nature:           {task.get('nature', '--')} ({'Expenses' if task.get('nature') == '4' else 'Income' if task.get('nature') == '5' else 'Unknown'})
-Amount:           €{task.get('amount', 0):.2f if task.get('amount') else '--'}
+Amount:           {amount_str}
 Description:      {task.get('description', '--') or '--'}
 Total Line Items: {task.get('total_line_items', 0)}
 
@@ -1010,7 +1017,7 @@ Total Line Items: {task.get('total_line_items', 0)}
 
 Started At:       {task.get('started_at', '--')}
 Completed At:     {task.get('completed_at', '--')}
-Duration:         {f"{int(task.get('duration_seconds', 0) // 60):02d}:{int(task.get('duration_seconds', 0) % 60):02d}" if task.get('duration_seconds') else '--'}
+Duration:         {duration_str}
 
 """
             # Add error message if present
