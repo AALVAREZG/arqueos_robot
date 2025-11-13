@@ -152,7 +152,14 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
         if TASK_CALLBACK:
             TASK_CALLBACK('step', step='Preparing operation data')
 
-        datos_arqueo = create_arqueo_data(operation_data)
+        # Extract tipo and detalle from operation_data
+        # operation_data structure: {"tipo": "arqueo", "detalle": {...}}
+        operation_type = operation_data.get('tipo', 'arqueo')
+        detalle = operation_data.get('detalle', {})
+
+        arqueo_logger.info(f'Operation type: {operation_type}')
+
+        datos_arqueo = create_arqueo_data(detalle)
         arqueo_logger.debug('Created arqueo data: %s', datos_arqueo)
 
         # Setup SICAL window
