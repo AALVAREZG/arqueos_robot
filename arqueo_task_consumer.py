@@ -84,6 +84,12 @@ class ArqueoConsumer:
             data = json.loads(body)
             logger.info(f"Message content: {data}")
 
+            # DEBUG: Log to GUI
+            if STATUS_CALLBACK:
+                # Import here to avoid circular dependency
+                from status_manager import status_manager
+                status_manager.add_log(f"Received message with task_id: {data.get('task_id', 'unknown')}", "DEBUG")
+
             task_id = data.get('task_id', 'unknown')
 
             # Notify GUI: task received
@@ -92,6 +98,12 @@ class ArqueoConsumer:
 
             # Extract operation details for GUI (with safe access)
             operation = data.get('operation_data', {}).get('operation', {})
+
+            # DEBUG: Log what keys are in the operation dict
+            if STATUS_CALLBACK:
+                from status_manager import status_manager
+                status_manager.add_log(f"CONSUMER: operation dict keys: {list(operation.keys())}", "DEBUG")
+
             operation_number = operation.get('num_operacion')
             total_amount = operation.get('totalOperacion')
 
@@ -113,6 +125,13 @@ class ArqueoConsumer:
 
             logger.info(f"Extracted task details - Operation: {operation_number}, Amount: {total_amount}, "
                        f"Date: {fecha}, Nature: {naturaleza}, Line items: {total_line_items}")
+
+            # DEBUG: Log extracted details to GUI
+            if STATUS_CALLBACK:
+                from status_manager import status_manager
+                status_manager.add_log(f"CONSUMER extracted - Operation: {operation_number}, Amount: {total_amount}, "
+                                      f"Date: {fecha}, Cash: {caja}, Third Party: {tercero}, "
+                                      f"Nature: {naturaleza}, Line items: {total_line_items}", "DEBUG")
 
             # Notify GUI: task started with full details
             if STATUS_CALLBACK:
