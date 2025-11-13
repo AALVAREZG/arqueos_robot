@@ -187,7 +187,7 @@ Send messages to the `sical_queue.arqueo` queue with the following structure:
 - `caja`: Cash register code
 - `expediente`: Expedition code (empty string or code)
 - `tercero`: Third-party identifier (NIF/CIF)
-- `naturaleza`: Operation nature ("4" for expenses, "5" for income)
+- `naturaleza`: Operation nature ("1", "2", "3", "4" for presupuestary operations, "5" for non-presupuestary operations)
 - `texto_sical`: Array with operation description
   - `tcargo`: Operation description text
 - `aplicaciones`: Array of budget line applications (NEW structure)
@@ -315,7 +315,7 @@ The robot sends responses to the `sical_results` queue:
 
 ```json
 {
-  "task_id": "203_08112024_50_income",
+  "task_id": "203_08112024_50_MPTOST",
   "operation_data": {
     "operation": {
       "tipo": "arqueo",
@@ -466,7 +466,7 @@ Real-time monitoring of the robot service:
 Shows detailed information about the task being processed:
 - Task ID and operation number
 - Date, cash register, third party
-- Nature type (Income/Expenses)
+- Nature type (Presupuestary/Non-presupuestary)
 - Amount and description
 - Line items progress with percentage
 - Current processing step
@@ -505,7 +505,7 @@ Sortable table with the following columns:
 - Amount
 - Cash Register
 - Third Party
-- Nature (Income/Expenses)
+- Nature (Presupuestary/Non-presupuestary)
 - Status (color-coded)
 - Duration (mm:ss)
 - Completed At

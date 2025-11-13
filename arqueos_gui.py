@@ -888,10 +888,10 @@ class ArqueosGUI:
 
                 # Nature display
                 nature = task.get('nature')
-                if nature == '4':
-                    nature_display = "Expenses"
+                if nature in ('1', '2', '3', '4'):
+                    nature_display = "Presupuestary"
                 elif nature == '5':
-                    nature_display = "Income"
+                    nature_display = "Non-presupuestary"
                 else:
                     nature_display = nature or "--"
 
@@ -1006,7 +1006,7 @@ Status:           {(task.get('status', '--') or '--').upper()}
 Date:             {task.get('date', '--')}
 Cash Register:    {task.get('cash_register', '--')}
 Third Party:      {task.get('third_party', '--')}
-Nature:           {task.get('nature', '--')} ({'Expenses' if task.get('nature') == '4' else 'Income' if task.get('nature') == '5' else 'Unknown'})
+Nature:           {task.get('nature', '--')} ({'Presupuestary' if task.get('nature') in ('1', '2', '3', '4') else 'Non-presupuestary' if task.get('nature') == '5' else 'Unknown'})
 Amount:           {amount_str}
 Description:      {task.get('description', '--') or '--'}
 Total Line Items: {task.get('total_line_items', 0)}

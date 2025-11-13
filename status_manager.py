@@ -27,7 +27,7 @@ class TaskInfo:
     cash_register: Optional[str] = None  # caja
     file_reference: Optional[str] = None  # expediente
     third_party: Optional[str] = None  # tercero
-    nature: Optional[str] = None  # naturaleza (4=expenses, 5=income)
+    nature: Optional[str] = None  # naturaleza (1-4=presupuestary, 5=non-presupuestary)
     description: Optional[str] = None  # resumen
     total_line_items: int = 0  # Total number of aplicaciones
     current_line_item: int = 0  # Current line item being processed
@@ -39,10 +39,10 @@ class TaskInfo:
 
     def nature_display(self) -> str:
         """Returns a human-readable nature label."""
-        if self.nature == '4':
-            return "💸 Expenses (Gastos)"
+        if self.nature in ('1', '2', '3', '4'):
+            return "📊 Presupuestary"
         elif self.nature == '5':
-            return "💰 Income (Ingresos)"
+            return "📋 Non-presupuestary"
         return "Unknown"
 
 
