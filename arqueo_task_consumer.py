@@ -90,6 +90,14 @@ class ArqueoConsumer:
                 from status_manager import status_manager
                 status_manager.add_log(f"Received message with task_id: {data.get('task_id', 'unknown')}", "DEBUG")
 
+                # DEBUG: Log the TOP-LEVEL keys in the message
+                status_manager.add_log(f"CONSUMER: TOP-LEVEL message keys: {list(data.keys())}", "DEBUG")
+
+                # DEBUG: Log the operation_data structure
+                if 'operation_data' in data:
+                    operation_data = data.get('operation_data', {})
+                    status_manager.add_log(f"CONSUMER: operation_data keys: {list(operation_data.keys())}", "DEBUG")
+
             task_id = data.get('task_id', 'unknown')
 
             # Notify GUI: task received
