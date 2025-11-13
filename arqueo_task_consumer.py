@@ -90,20 +90,29 @@ class ArqueoConsumer:
             if STATUS_CALLBACK:
                 STATUS_CALLBACK('task_received', task_id=task_id)
 
-            # Extract operation details for GUI
+            # Extract operation details for GUI (with safe access)
             operation = data.get('operation_data', {}).get('operation', {})
             operation_number = operation.get('num_operacion')
             total_amount = operation.get('totalOperacion')
 
-            # Extract additional details
+            # Extract additional details safely
             fecha = operation.get('fecha')
             caja = operation.get('caja')
             expediente = operation.get('expediente', 'rbt-apunte-arqueo')
             tercero = operation.get('tercero')
             naturaleza = operation.get('naturaleza', '4')
-            resumen = operation.get('texto_sical', [{}])[0].get('tcargo') if operation.get('texto_sical') else None
+
+            # Safely extract description from texto_sical
+            resumen = None
+            texto_sical = operation.get('texto_sical', [])
+            if texto_sical and len(texto_sical) > 0 and isinstance(texto_sical[0], dict):
+                resumen = texto_sical[0].get('tcargo')
+
             aplicaciones = operation.get('aplicaciones', [])
-            total_line_items = len(aplicaciones)
+            total_line_items = len(aplicaciones) if aplicaciones else 0
+
+            logger.info(f"Extracted task details - Operation: {operation_number}, Amount: {total_amount}, "
+                       f"Date: {fecha}, Nature: {naturaleza}, Line items: {total_line_items}")
 
             # Notify GUI: task started with full details
             if STATUS_CALLBACK:
@@ -144,9 +153,15 @@ class ArqueoConsumer:
             ch.basic_ack(delivery_tag=method.delivery_tag)
             logger.info(f"Successfully processed message {properties.correlation_id}")
 
-            # Notify GUI: task completed
+            # Notify GUI: check result status to determine if completed or failed
             if STATUS_CALLBACK:
-                STATUS_CALLBACK('task_completed', task_id=task_id)
+                # Check if the operation actually succeeded
+                from arqueo_tasks import OperationStatus
+                if result.status in (OperationStatus.COMPLETED, OperationStatus.INCOMPLETED):
+                    STATUS_CALLBACK('task_completed', task_id=task_id)
+                else:
+                    # Operation failed (FAILED or PENDING status means something went wrong)
+                    STATUS_CALLBACK('task_failed', task_id=task_id)
 
         except Exception as e:
             logger.exception(f"Error processing message: {e}")
