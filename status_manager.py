@@ -9,6 +9,7 @@ import threading
 from datetime import datetime
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
+from task_history_db import get_task_history_db
 
 
 @dataclass
@@ -120,6 +121,8 @@ class StatusManager:
         debug_info = f"Date: {kwargs.get('date')}, Cash: {kwargs.get('cash_register')}, " \
                      f"Third Party: {kwargs.get('third_party')}, Nature: {kwargs.get('nature')}"
 
+        start_time = datetime.now()
+
         with self._data_lock:
             if self.stats['pending'] > 0:
                 self.stats['pending'] -= 1
@@ -129,7 +132,7 @@ class StatusManager:
                 task_id=task_id,
                 operation_number=operation_number,
                 amount=amount,
-                start_time=datetime.now(),
+                start_time=start_time,
                 date=kwargs.get('date'),
                 cash_register=kwargs.get('cash_register'),
                 file_reference=kwargs.get('file_reference'),
@@ -146,6 +149,30 @@ class StatusManager:
         self.add_log(f"StatusManager storing - {debug_info}", "DEBUG")
         self.add_log(f"Stored in TaskInfo - {stored_info}", "DEBUG")
 
+        # Persist to database
+        try:
+            db = get_task_history_db()
+            task_data = {
+                'task_id': task_id,
+                'operation_number': operation_number,
+                'amount': amount,
+                'date': kwargs.get('date'),
+                'cash_register': kwargs.get('cash_register'),
+                'third_party': kwargs.get('third_party'),
+                'nature': kwargs.get('nature'),
+                'description': kwargs.get('description'),
+                'total_line_items': kwargs.get('total_line_items', 0),
+                'status': 'processing',
+                'started_at': start_time,
+                'completed_at': None,
+                'duration_seconds': None,
+                'error_message': None,
+                'raw_data': kwargs
+            }
+            db.save_task(task_data)
+        except Exception as e:
+            self.add_log(f"Failed to save task to database: {e}", "ERROR")
+
     def task_progress(self, step: str, **kwargs):
         """Update the current step of the task being processed."""
         with self._data_lock:
@@ -158,8 +185,11 @@ class StatusManager:
                 if 'line_item_details' in kwargs:
                     self.current_task.line_item_details = kwargs['line_item_details']
 
-    def task_completed(self, task_id: str, success: bool = True):
+    def task_completed(self, task_id: str, success: bool = True, error_message: Optional[str] = None):
         """Called when a task completes (success or failure)."""
+        completed_at = datetime.now()
+        duration_seconds = None
+
         with self._data_lock:
             if self.stats['processing'] > 0:
                 self.stats['processing'] -= 1
@@ -171,9 +201,24 @@ class StatusManager:
 
             self.stats['total_processed'] += 1
 
-            # Clear current task if it matches
+            # Calculate duration if we have the current task
             if self.current_task and self.current_task.task_id == task_id:
+                duration_seconds = self.current_task.duration()
                 self.current_task = None
+
+        # Update database
+        try:
+            db = get_task_history_db()
+            status = 'completed' if success else 'failed'
+            db.update_task_status(
+                task_id=task_id,
+                status=status,
+                completed_at=completed_at,
+                duration_seconds=duration_seconds,
+                error_message=error_message
+            )
+        except Exception as e:
+            self.add_log(f"Failed to update task in database: {e}", "ERROR")
 
     def add_log(self, message: str, level: str = "INFO"):
         """Add a log message to the circular buffer."""
