@@ -115,6 +115,10 @@ class StatusManager:
     def task_started(self, task_id: str, operation_number: Optional[str] = None,
                      amount: Optional[float] = None, **kwargs):
         """Called when a task starts processing."""
+        # Store debug info before acquiring lock
+        debug_info = f"Date: {kwargs.get('date')}, Cash: {kwargs.get('cash_register')}, " \
+                     f"Third Party: {kwargs.get('third_party')}, Nature: {kwargs.get('nature')}"
+
         with self._data_lock:
             if self.stats['pending'] > 0:
                 self.stats['pending'] -= 1
@@ -133,6 +137,13 @@ class StatusManager:
                 description=kwargs.get('description'),
                 total_line_items=kwargs.get('total_line_items', 0)
             )
+
+            stored_info = f"Date: {self.current_task.date}, Cash: {self.current_task.cash_register}, " \
+                         f"Third Party: {self.current_task.third_party}, Nature: {self.current_task.nature}"
+
+        # Log AFTER releasing the lock
+        self.add_log(f"StatusManager storing - {debug_info}", "DEBUG")
+        self.add_log(f"Stored in TaskInfo - {stored_info}", "DEBUG")
 
     def task_progress(self, step: str, **kwargs):
         """Update the current step of the task being processed."""

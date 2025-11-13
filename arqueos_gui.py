@@ -440,10 +440,17 @@ class ArqueosGUI:
             operation_number = kwargs.get('operation_number')
             amount = kwargs.get('amount')
 
+            # DEBUG: Log what we received
+            status_manager.add_log(f"GUI received task_started with keys: {list(kwargs.keys())}", "DEBUG")
+            status_manager.add_log(f"Date: {kwargs.get('date')}, Cash: {kwargs.get('cash_register')}, "
+                                  f"Third Party: {kwargs.get('third_party')}, Nature: {kwargs.get('nature')}", "DEBUG")
+
             # Pass all additional kwargs (date, cash_register, third_party, nature, etc.)
             # Remove the keys we've already extracted to avoid duplicate arguments
             additional_kwargs = {k: v for k, v in kwargs.items()
                                if k not in ('task_id', 'operation_number', 'amount')}
+
+            status_manager.add_log(f"Passing additional_kwargs keys: {list(additional_kwargs.keys())}", "DEBUG")
             status_manager.task_started(task_id, operation_number, amount, **additional_kwargs)
         elif event == 'task_completed':
             task_id = kwargs.get('task_id', 'unknown')
