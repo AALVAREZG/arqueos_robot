@@ -439,8 +439,12 @@ class ArqueosGUI:
             task_id = kwargs.get('task_id', 'unknown')
             operation_number = kwargs.get('operation_number')
             amount = kwargs.get('amount')
+
             # Pass all additional kwargs (date, cash_register, third_party, nature, etc.)
-            status_manager.task_started(task_id, operation_number, amount, **kwargs)
+            # Remove the keys we've already extracted to avoid duplicate arguments
+            additional_kwargs = {k: v for k, v in kwargs.items()
+                               if k not in ('task_id', 'operation_number', 'amount')}
+            status_manager.task_started(task_id, operation_number, amount, **additional_kwargs)
         elif event == 'task_completed':
             task_id = kwargs.get('task_id', 'unknown')
             status_manager.task_completed(task_id, success=True)
@@ -457,8 +461,9 @@ class ArqueosGUI:
         """
         if event == 'step':
             step = kwargs.get('step', '')
-            # Pass all kwargs including current_line_item and line_item_details
-            status_manager.task_progress(step, **kwargs)
+            # Pass all kwargs except 'step' itself (current_line_item, line_item_details, etc.)
+            additional_kwargs = {k: v for k, v in kwargs.items() if k != 'step'}
+            status_manager.task_progress(step, **additional_kwargs)
 
     def update_display(self):
         """Update the display with current status (called periodically)."""
