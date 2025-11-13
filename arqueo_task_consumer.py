@@ -112,6 +112,12 @@ class ArqueoConsumer:
                 from status_manager import status_manager
                 status_manager.add_log(f"CONSUMER: operation dict keys: {list(operation.keys())}", "DEBUG")
 
+                # Check if operation data is in 'detalle' or 'result'
+                if 'detalle' in operation and isinstance(operation['detalle'], dict):
+                    status_manager.add_log(f"CONSUMER: detalle keys: {list(operation['detalle'].keys())}", "DEBUG")
+                if 'result' in operation and isinstance(operation['result'], dict):
+                    status_manager.add_log(f"CONSUMER: result keys: {list(operation['result'].keys())}", "DEBUG")
+
             operation_number = operation.get('num_operacion')
             total_amount = operation.get('totalOperacion')
 
