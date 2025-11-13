@@ -255,7 +255,7 @@ class ArqueosGUI:
         self.history_tree.heading("amount", text="Amount")
         self.history_tree.heading("cash_register", text="Cash Reg.")
         self.history_tree.heading("third_party", text="Third Party")
-        self.history_tree.heading("nature", text="Type")
+        self.history_tree.heading("nature", text="Nature")
         self.history_tree.heading("status", text="Status")
         self.history_tree.heading("duration", text="Duration")
         self.history_tree.heading("completed_at", text="Completed At")
@@ -472,7 +472,7 @@ class ArqueosGUI:
         self.amount_label = ttk.Label(task_frame, text="--")
         self.amount_label.grid(row=3, column=1, sticky=tk.W, padx=(5, 15))
 
-        ttk.Label(task_frame, text="Type:", font=("Segoe UI", 9)).grid(
+        ttk.Label(task_frame, text="Nature:", font=("Segoe UI", 9)).grid(
             row=3, column=2, sticky=tk.W
         )
         self.nature_label = ttk.Label(task_frame, text="--")

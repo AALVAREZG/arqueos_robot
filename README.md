@@ -466,7 +466,7 @@ Real-time monitoring of the robot service:
 Shows detailed information about the task being processed:
 - Task ID and operation number
 - Date, cash register, third party
-- Operation type (Income/Expenses)
+- Nature type (Income/Expenses)
 - Amount and description
 - Line items progress with percentage
 - Current processing step
@@ -505,7 +505,7 @@ Sortable table with the following columns:
 - Amount
 - Cash Register
 - Third Party
-- Type (Income/Expenses)
+- Nature (Income/Expenses)
 - Status (color-coded)
 - Duration (mm:ss)
 - Completed At
