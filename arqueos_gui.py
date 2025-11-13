@@ -255,7 +255,7 @@ class ArqueosGUI:
         self.history_tree.heading("amount", text="Amount")
         self.history_tree.heading("cash_register", text="Cash Reg.")
         self.history_tree.heading("third_party", text="Third Party")
-        self.history_tree.heading("nature", text="Type")
+        self.history_tree.heading("nature", text="Nature")
         self.history_tree.heading("status", text="Status")
         self.history_tree.heading("duration", text="Duration")
         self.history_tree.heading("completed_at", text="Completed At")
@@ -472,7 +472,7 @@ class ArqueosGUI:
         self.amount_label = ttk.Label(task_frame, text="--")
         self.amount_label.grid(row=3, column=1, sticky=tk.W, padx=(5, 15))
 
-        ttk.Label(task_frame, text="Type:", font=("Segoe UI", 9)).grid(
+        ttk.Label(task_frame, text="Nature:", font=("Segoe UI", 9)).grid(
             row=3, column=2, sticky=tk.W
         )
         self.nature_label = ttk.Label(task_frame, text="--")
@@ -888,10 +888,10 @@ class ArqueosGUI:
 
                 # Nature display
                 nature = task.get('nature')
-                if nature == '4':
-                    nature_display = "Expenses"
+                if nature in ('1', '2', '3', '4'):
+                    nature_display = "Presupuestary"
                 elif nature == '5':
-                    nature_display = "Income"
+                    nature_display = "Non-presupuestary"
                 else:
                     nature_display = nature or "--"
 
@@ -1006,7 +1006,7 @@ Status:           {(task.get('status', '--') or '--').upper()}
 Date:             {task.get('date', '--')}
 Cash Register:    {task.get('cash_register', '--')}
 Third Party:      {task.get('third_party', '--')}
-Nature:           {task.get('nature', '--')} ({'Expenses' if task.get('nature') == '4' else 'Income' if task.get('nature') == '5' else 'Unknown'})
+Nature:           {task.get('nature', '--')} ({'Presupuestary' if task.get('nature') in ('1', '2', '3', '4') else 'Non-presupuestary' if task.get('nature') == '5' else 'Unknown'})
 Amount:           {amount_str}
 Description:      {task.get('description', '--') or '--'}
 Total Line Items: {task.get('total_line_items', 0)}

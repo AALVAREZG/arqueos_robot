@@ -135,24 +135,21 @@ Send messages to the `sical_queue.arqueo` queue with the following structure:
 
 ```json
 {
-  "id_task": "204_08112024_5000_MPTOST",
-  "num_operaciones": 1,
-  "liquido_operaciones": 5000.0,
-  "creation_date": "2024-11-08T15:30:00.000Z",
-  "operaciones": [
-    {
+  "task_id": "204_08112024_5000_MPTOST",
+  "operation_data": {
+    "operation": {
       "tipo": "arqueo",
       "detalle": {
         "fecha": "08112024",
         "caja": "204",
         "expediente": "",
         "tercero": "43000000M",
+        "naturaleza": "5",
         "texto_sical": [
           {
             "tcargo": "RECAUDADO TRIBUTOS VARIOS C60"
           }
         ],
-        "naturaleza": "5",
         "aplicaciones": [
           {
             "year": "2024",
@@ -172,25 +169,25 @@ Send messages to the `sical_queue.arqueo` queue with the following structure:
         }
       }
     }
-  ]
+  }
 }
 ```
 
 #### Field Descriptions
 
 **Top-level fields:**
-- `id_task`: Unique task identifier
-- `num_operaciones`: Number of operations in this task
-- `liquido_operaciones`: Total liquid amount
-- `creation_date`: Task creation timestamp (ISO 8601)
-- `operaciones`: Array of operations to process
+- `task_id`: Unique task identifier (used for tracking and logging)
+- `operation_data`: Container object for operation details
+  - `operation`: Operation object containing type and details
+    - `tipo`: Operation type identifier (read from message, typically "arqueo")
+    - `detalle`: Detailed operation data (see below)
 
-**Operation detalle fields:**
+**Detalle fields (inside operation_data.operation.detalle):**
 - `fecha`: Date in format `ddmmyyyy` (e.g., "08112024")
 - `caja`: Cash register code
 - `expediente`: Expedition code (empty string or code)
 - `tercero`: Third-party identifier (NIF/CIF)
-- `naturaleza`: Operation nature ("4" for expenses, "5" for income)
+- `naturaleza`: Operation nature ("1", "2", "3", "4" for presupuestary operations, "5" for non-presupuestary operations)
 - `texto_sical`: Array with operation description
   - `tcargo`: Operation description text
 - `aplicaciones`: Array of budget line applications (NEW structure)
@@ -236,39 +233,44 @@ The robot sends responses to the `sical_results` queue:
 
 ```json
 {
-  "tipo": "arqueo",
-  "detalle": {
-    "fecha": "08112024",
-    "caja": "207",
-    "expediente": "",
-    "tercero": "000",
-    "texto_sical": [{"tcargo": "TRANSF. N/F: LICENCIA DE OBRA"}],
-    "naturaleza": "4",
-    "aplicaciones": [
-      {
-        "year": "2024",
-        "economica": "290",
-        "proyecto": "",
-        "contraido": false,
-        "base_imponible": 0.0,
-        "tipo": 0.0,
-        "importe": 1200.0,
-        "cuenta_pgp": ""
-      },
-      {
-        "year": "2024",
-        "economica": "20104",
-        "proyecto": "",
-        "contraido": true,
-        "base_imponible": 0.0,
-        "tipo": 0.0,
-        "importe": 200.0,
-        "cuenta_pgp": ""
+  "task_id": "207_08112024_1400_expense",
+  "operation_data": {
+    "operation": {
+      "tipo": "arqueo",
+      "detalle": {
+        "fecha": "08112024",
+        "caja": "207",
+        "expediente": "",
+        "tercero": "000",
+        "naturaleza": "4",
+        "texto_sical": [{"tcargo": "TRANSF. N/F: LICENCIA DE OBRA"}],
+        "aplicaciones": [
+          {
+            "year": "2024",
+            "economica": "290",
+            "proyecto": "",
+            "contraido": false,
+            "base_imponible": 0.0,
+            "tipo": 0.0,
+            "importe": 1200.0,
+            "cuenta_pgp": ""
+          },
+          {
+            "year": "2024",
+            "economica": "20104",
+            "proyecto": "",
+            "contraido": true,
+            "base_imponible": 0.0,
+            "tipo": 0.0,
+            "importe": 200.0,
+            "cuenta_pgp": ""
+          }
+        ],
+        "descuentos": [],
+        "aux_data": {},
+        "metadata": {"generation_datetime": "2024-11-08T15:30:00.000Z"}
       }
-    ],
-    "descuentos": [],
-    "aux_data": {},
-    "metadata": {"generation_datetime": "2024-11-08T15:30:00.000Z"}
+    }
   }
 }
 ```
@@ -277,29 +279,34 @@ The robot sends responses to the `sical_results` queue:
 
 ```json
 {
-  "tipo": "arqueo",
-  "detalle": {
-    "fecha": "08112024",
-    "caja": "207",
-    "expediente": "",
-    "tercero": "45575500B",
-    "texto_sical": [{"tcargo": "TRANSF N/F SUBVENCION GUARDERIA"}],
-    "naturaleza": "4",
-    "aplicaciones": [
-      {
-        "year": "2024",
-        "economica": "45002",
-        "proyecto": "24000014",
-        "contraido": false,
-        "base_imponible": 0.0,
-        "tipo": 0.0,
-        "importe": 1500.0,
-        "cuenta_pgp": ""
+  "task_id": "207_08112024_1500_project",
+  "operation_data": {
+    "operation": {
+      "tipo": "arqueo",
+      "detalle": {
+        "fecha": "08112024",
+        "caja": "207",
+        "expediente": "",
+        "tercero": "45575500B",
+        "naturaleza": "4",
+        "texto_sical": [{"tcargo": "TRANSF N/F SUBVENCION GUARDERIA"}],
+        "aplicaciones": [
+          {
+            "year": "2024",
+            "economica": "45002",
+            "proyecto": "24000014",
+            "contraido": false,
+            "base_imponible": 0.0,
+            "tipo": 0.0,
+            "importe": 1500.0,
+            "cuenta_pgp": ""
+          }
+        ],
+        "descuentos": [],
+        "aux_data": {},
+        "metadata": {"generation_datetime": "2024-11-08T15:30:00.000Z"}
       }
-    ],
-    "descuentos": [],
-    "aux_data": {},
-    "metadata": {"generation_datetime": "2024-11-08T15:30:00.000Z"}
+    }
   }
 }
 ```
@@ -308,29 +315,34 @@ The robot sends responses to the `sical_results` queue:
 
 ```json
 {
-  "tipo": "arqueo",
-  "detalle": {
-    "fecha": "08112024",
-    "caja": "203",
-    "expediente": "",
-    "tercero": "25352229L",
-    "texto_sical": [{"tcargo": "FRACCIONAMIENTO DEUDA"}],
-    "naturaleza": "5",
-    "aplicaciones": [
-      {
-        "year": "2024",
-        "economica": "39900",
-        "proyecto": "",
-        "contraido": 2500046,
-        "base_imponible": 0.0,
-        "tipo": 0.0,
-        "importe": 50.0,
-        "cuenta_pgp": ""
+  "task_id": "203_08112024_50_MPTOST",
+  "operation_data": {
+    "operation": {
+      "tipo": "arqueo",
+      "detalle": {
+        "fecha": "08112024",
+        "caja": "203",
+        "expediente": "",
+        "tercero": "25352229L",
+        "naturaleza": "5",
+        "texto_sical": [{"tcargo": "FRACCIONAMIENTO DEUDA"}],
+        "aplicaciones": [
+          {
+            "year": "2024",
+            "economica": "39900",
+            "proyecto": "",
+            "contraido": 2500046,
+            "base_imponible": 0.0,
+            "tipo": 0.0,
+            "importe": 50.0,
+            "cuenta_pgp": ""
+          }
+        ],
+        "descuentos": [],
+        "aux_data": {},
+        "metadata": {"generation_datetime": "2024-11-08T15:30:00.000Z"}
       }
-    ],
-    "descuentos": [],
-    "aux_data": {},
-    "metadata": {"generation_datetime": "2024-11-08T15:30:00.000Z"}
+    }
   }
 }
 ```
@@ -382,6 +394,8 @@ The robot sends responses to the `sical_results` queue:
 | N/A | `metadata` | NEW: Generation metadata |
 
 **Important Changes**:
+- ✅ Use `task_id` field (not `id_task`)
+- ✅ Wrap operation in `operation_data.operation` structure
 - ✅ Use `aplicaciones` array (not `final`)
 - ✅ Use `economica` field (not `partida`)
 - ✅ Use `importe` as float (not `IMPORTE_PARTIDA` as string)
@@ -452,7 +466,7 @@ Real-time monitoring of the robot service:
 Shows detailed information about the task being processed:
 - Task ID and operation number
 - Date, cash register, third party
-- Operation type (Income/Expenses)
+- Nature type (Presupuestary/Non-presupuestary)
 - Amount and description
 - Line items progress with percentage
 - Current processing step
@@ -491,7 +505,7 @@ Sortable table with the following columns:
 - Amount
 - Cash Register
 - Third Party
-- Type (Income/Expenses)
+- Nature (Presupuestary/Non-presupuestary)
 - Status (color-coded)
 - Duration (mm:ss)
 - Completed At
