@@ -477,6 +477,17 @@ class ArqueosGUI:
         # Get current status
         status = status_manager.get_status()
 
+        # DEBUG: Log what get_status returned for current_task (only once per task)
+        current_task = status.get('current_task')
+        if current_task and not hasattr(self, '_last_logged_task_id'):
+            self._last_logged_task_id = current_task.get('task_id')
+            status_manager.add_log(f"GUI update_display sees task: Date={current_task.get('date')}, "
+                                  f"Cash={current_task.get('cash_register')}, "
+                                  f"Nature={current_task.get('nature')}", "DEBUG")
+        elif not current_task:
+            if hasattr(self, '_last_logged_task_id'):
+                del self._last_logged_task_id
+
         # Update service status
         if status['service_running']:
             self.service_status_label.config(text="● RUNNING", foreground="green")
