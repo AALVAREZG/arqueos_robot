@@ -138,9 +138,8 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
     Returns:
         OperationResult: Object containing the operation results and status
     """
-    # Initialize COM for Windows UI Automation
-    # This is required for robocorp.windows to work correctly
-    comtypes.CoInitialize()
+    # NOTE: COM initialization is now handled at the consumer thread level
+    # to avoid COM state issues between successive task executions
 
     arqueo_logger.info('Entry Operación arqueo: %s', operation_data)
     init_time = datetime.now()
@@ -216,11 +215,7 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
         result.end_time = str(end_time)
         result.duration = str(end_time - init_time)
 
-        # Uninitialize COM
-        try:
-            comtypes.CoUninitialize()
-        except Exception as e:
-            arqueo_logger.warning(f"Error uninitializing COM: {e}")
+        # NOTE: COM uninitialization is now handled at the consumer thread level
 
     return result
 

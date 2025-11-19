@@ -4,6 +4,7 @@ import pika
 import json
 import dataclasses
 import logging
+import comtypes
 from typing import Optional, Callable
 from config import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
 from arqueo_tasks import OperationEncoder, operacion_arqueo
@@ -206,18 +207,27 @@ class ArqueoConsumer:
 
     def start_consuming(self):
         """Start consuming messages from the queue"""
+        # Initialize COM for Windows UI Automation at thread level
+        # This ensures COM stays initialized across all task executions
+        # and avoids COM state issues between successive tasks
+        try:
+            comtypes.CoInitialize()
+            logger.info("COM initialized for consumer thread")
+        except Exception as e:
+            logger.warning(f"COM initialization warning (may already be initialized): {e}")
+
         try:
             logger.info(f"Starting to consume messages from {self.queue_name}")
-            
+
             # Register the callback function to be called when messages arrive
             self.channel.basic_consume(
                 queue=self.queue_name,
                 on_message_callback=self.callback
             )
-            
+
             # Start consuming messages - this blocks until stop_consuming() is called
             self.channel.start_consuming()
-            
+
         except KeyboardInterrupt:
             logger.info("Received interrupt signal, shutting down...")
             self.stop_consuming()
@@ -225,6 +235,13 @@ class ArqueoConsumer:
             logger.error(f"Error while consuming messages: {e}")
             self.stop_consuming()
             raise
+        finally:
+            # Uninitialize COM when consumer thread exits
+            try:
+                comtypes.CoUninitialize()
+                logger.info("COM uninitialized for consumer thread")
+            except Exception as e:
+                logger.warning(f"Error uninitializing COM: {e}")
 
     def stop_consuming(self):
         """Stop consuming messages and close connections"""
