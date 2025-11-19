@@ -628,8 +628,8 @@ The GUI can be packaged as a standalone Windows executable:
 # Install PyInstaller
 pip install pyinstaller
 
-# Create standalone executable
-pyinstaller --onefile --windowed --name="ArqueosRobot" arqueos_gui.py
+# Build the executable using the spec file
+pyinstaller ArqueosRobot.spec
 
 # Executable will be in dist/ArqueosRobot.exe
 ```
@@ -640,6 +640,45 @@ pyinstaller --onefile --windowed --name="ArqueosRobot" arqueos_gui.py
 - Includes all dependencies
 - Easy deployment to municipal staff
 - No command-line knowledge needed
+
+#### Using .env File with the Executable
+
+When distributing the executable, credentials should be stored in a `.env` file placed **in the same directory** as the `.exe` file:
+
+**Setup for End Users:**
+
+1. Copy `ArqueosRobot.exe` to the desired location
+2. Copy `.env.example` to the same directory and rename it to `.env`
+3. Edit `.env` with the actual RabbitMQ credentials:
+
+```bash
+# .env file (place next to ArqueosRobot.exe)
+RABBITMQ_HOST=your-rabbitmq-server.com
+RABBITMQ_PORT=5672
+RABBITMQ_USER=your_username
+RABBITMQ_PASS=your_secure_password
+```
+
+**Important Notes:**
+- The `.env` file must be in the **same directory** as the executable
+- The executable will automatically detect and load credentials from the `.env` file
+- If `.env` is not found, it will use default values (localhost, guest, guest)
+- Never include the `.env` file when distributing the executable - users should create their own
+- Keep `.env` secure - it contains sensitive credentials
+
+**Directory Structure for Distribution:**
+```
+C:\Program Files\ArqueosRobot\
+├── ArqueosRobot.exe      # The executable
+└── .env                  # User's credentials (not included in distribution)
+```
+
+**Why Use .env Files with Executables?**
+- ✅ Easy credential updates without rebuilding the executable
+- ✅ Different credentials for different environments (dev, staging, production)
+- ✅ Secure - credentials not hardcoded in the executable
+- ✅ User-friendly - simple text file editing
+- ✅ No need for environment variable configuration in Windows
 
 ### GUI Files
 
