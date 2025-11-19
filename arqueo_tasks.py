@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Callable
 
 # Third-party imports
+import comtypes
 from robocorp import windows
 from robocorp.tasks import task
 
@@ -130,13 +131,17 @@ class SicalWindowManager:
 def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
     """
     Process an arqueo operation in SICAL system based on received message data.
-    
+
     Args:
         operation_data: Dictionary containing the operation details from RabbitMQ message
-    
+
     Returns:
         OperationResult: Object containing the operation results and status
     """
+    # Initialize COM for Windows UI Automation
+    # This is required for robocorp.windows to work correctly
+    comtypes.CoInitialize()
+
     arqueo_logger.info('Entry Operación arqueo: %s', operation_data)
     init_time = datetime.now()
     result = OperationResult(
@@ -144,7 +149,7 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
         init_time=str(init_time),
         sical_is_open=False
     )
-    
+
     window_manager = SicalWindowManager()
 
     try:
@@ -205,12 +210,18 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
         # Cleanup
         arqueo_logger.info("Finalize manually until develop is complete")
         #window_manager.close_window()
-        
+
         # Calculate duration
         end_time = datetime.now()
         result.end_time = str(end_time)
         result.duration = str(end_time - init_time)
-    
+
+        # Uninitialize COM
+        try:
+            comtypes.CoUninitialize()
+        except Exception as e:
+            arqueo_logger.warning(f"Error uninitializing COM: {e}")
+
     return result
 
 def create_arqueo_data(operation_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -368,18 +379,34 @@ def abrir_ventana_opcion_en_menu(menu_a_buscar):
 @task
 def retraer_todos_elementos_del_menu():
     '''Repliega todos los elementos del menu'''
-    tree_elements = ['GASTOS', 'INGRESOS', 'OPERACIONES NO PRESUPUESTARIAS', 'TESORERIA',
-                     'CONTABILIDAD GENERAL', 'TERCEROS', 'GASTOS CON FINANCIACION AFECTADA \ PROYECTO',
-                     'PAGOS A JUSTIFICAR Y ANTICIPOS DE CAJA FIJA', 'ADMINISTRACION DEL SISTEMA',
-                     'TRANSACCIONES ESPECIALES', 'CONSULTAS AVANZADAS', 'FACTURAS', 
-                     'OFICINA DE PRESUPUESTO', 'INVENTARIO CONTABLE']
-    
-    app = windows.find_window('regex:.*FMenuSical')
-    for element in tree_elements:
-        element = app.find(f'control:"TreeItemControl" and name:"{element}"',
-                           search_depth=2, timeout=0.01)
-        #element.send_keys(keys='{ADD}')
-        element.send_keys(keys='{SUBTRACT}', wait_time=0.01)
+    # Initialize COM for Windows UI Automation if called independently
+    try:
+        comtypes.CoInitialize()
+        com_initialized = True
+    except OSError:
+        # COM already initialized (e.g., when called from operacion_arqueo)
+        com_initialized = False
+
+    try:
+        tree_elements = ['GASTOS', 'INGRESOS', 'OPERACIONES NO PRESUPUESTARIAS', 'TESORERIA',
+                         'CONTABILIDAD GENERAL', 'TERCEROS', 'GASTOS CON FINANCIACION AFECTADA \ PROYECTO',
+                         'PAGOS A JUSTIFICAR Y ANTICIPOS DE CAJA FIJA', 'ADMINISTRACION DEL SISTEMA',
+                         'TRANSACCIONES ESPECIALES', 'CONSULTAS AVANZADAS', 'FACTURAS',
+                         'OFICINA DE PRESUPUESTO', 'INVENTARIO CONTABLE']
+
+        app = windows.find_window('regex:.*FMenuSical')
+        for element in tree_elements:
+            element = app.find(f'control:"TreeItemControl" and name:"{element}"',
+                               search_depth=2, timeout=0.01)
+            #element.send_keys(keys='{ADD}')
+            element.send_keys(keys='{SUBTRACT}', wait_time=0.01)
+    finally:
+        # Only uninitialize if we initialized it in this function
+        if com_initialized:
+            try:
+                comtypes.CoUninitialize()
+            except Exception as e:
+                arqueo_logger.warning(f"Error uninitializing COM: {e}")
 
 
 def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: OperationResult) -> OperationResult:
