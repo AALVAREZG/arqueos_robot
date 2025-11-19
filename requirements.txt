@@ -4,14 +4,17 @@ python-dotenv==1.0.0
 tenacity==8.2.2
 
 # RPA/Robocorp dependencies
-rpaframework==30.0.1
-robocorp==2.1.3
-robocorp-browser==2.3.4
-robocorp-windows==1.0.4
-robocorp-truststore==0.8.0
+rpaframework==28.6.3
+robocorp==2.1.2
+#robocorp-browser==2.3.4
+robocorp-windows==1.0.4 # requires python<=3.11
+#robocorp-truststore==0.8.0
 
-# Testing dependencies
+# Testing dependences
 pytest==7.4.3
 pytest-mock==3.12.0
 pytest-cov==4.1.0
 pytest-timeout==2.2.0
+
+# Pyinstaller for generate .ext
+pyinstaller

@@ -2,6 +2,7 @@
 
 ![Tests](https://github.com/AALVAREZG/arqueos_robot/workflows/Tests/badge.svg)
 ![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)
+!! DONT USE PYTHON VERSION >3.11 INCOMPATIBLE WITH ROBOCORP-WINDOWS.
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 A Robotic Process Automation (RPA) application for automating "arqueos" (accounting reconciliations) operations in the SICAL II financial management system used by Spanish municipal administrations.
@@ -57,7 +58,9 @@ cd arqueos_robot
 
 ```bash
 # Using venv
-python -m venv venv
+# USE PYTHON VERSION <= 3.11
+
+python -m venv venv # OR python311 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Or using conda

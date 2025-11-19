@@ -32,3 +32,7 @@ coverage.xml
 dist/
 build/
 *.egg-info/
+
+#history
+*.db 
+
