@@ -336,9 +336,7 @@ def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
         # Fill main data
         fill_main_panel_data(ventana_arqueo, datos_arqueo, result)
         
-        # Process aplicaciones. Not implemented yet, implemented in fill_main_panel_data
-        # result = process_aplicaciones(ventana_arqueo, datos_arqueo['aplicaciones'], result)
-        
+                
         if result.status != OperationStatus.FAILED:
             result.status = OperationStatus.COMPLETED
             
@@ -504,6 +502,7 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
                         )  # introduzco un delay porque la opción timeout de wait no funciona
                         windows.wait_for_condition(new_button_element.is_disposed)
                         break
+
                 elif (naturaleza_operacion == '5'):
                     ventana_arqueo.send_keys(
                         keys=aplicacion["partida"],
@@ -511,12 +510,33 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
                         wait_time=default_wait_time,
                         send_enter=False,
                     )
-                    if not aplicacion.get("contraido", False):
+                    _contraido = aplicacion.get("contraido", False)
+                    if not _contraido:
                         arqueo_logger.info("NATURALEZA 5, not contraido. SEND ADITIONAL SEND KEYs")
                         ventana_arqueo.send_keys(keys="{Tab}", wait_time=0.02, interval=0.02)
                     else:
+                        arqueo_logger.info(f"VALOR DEL CONTRAIDO: {_contraido}")
+                        #NOS POSICIONAMOS EN LA CELDA CONTRAIDO
+                        time.sleep(1)
+                        arqueo_logger.info(f"enviamos TAB PARA POSICIONARNOS EN CONTRAIDO")
                         ventana_arqueo.send_keys(keys="{Tab}", wait_time=0.02, interval=0.02)
-                        arqueo_logger.info(f"TODO;: PROCESS CONTRAIDO.....{aplicacion.get('contraido', 'sin contraido')}")
+                        time.sleep(1)
+
+                        if clean_value(_contraido) == True: #nuevo contraido
+                            # tenemos que enviar las siguientes teclas "({Alt}{Down} x 2) + {Fin} + {Enter}"
+                            arqueo_logger.critical(f"tenemos que enviar combinacion teclado para nuevo contraido ")
+                            arqueo_logger.critical(f"enviamos primer ALT + DOWN")
+                            ventana_arqueo.send_keys(keys="{Alt}{Down}", wait_time=1 )
+                            arqueo_logger.critical(f"enviamos SEGUNDO ALT + DOWN")
+                            #ventana_arqueo.send_keys(keys="{Alt}{Down}", wait_time=4 )
+                            arqueo_logger.critical(f"enviamos END")
+                            ventana_arqueo.send_keys(keys="{End}", wait_time=1 )
+                            arqueo_logger.critical(f"enviamos ENTER")
+                            ventana_arqueo.send_keys(keys="{Enter}", wait_time=1 )
+                        else: #~contraido existente
+                            arqueo_logger.critical(f"contraido existente, escribimos su valor")
+                            ventana_arqueo.send_keys(keys=_contraido)
+                            arqueo_logger.info(f"TODO;: PROCESS CONTRAIDO.....{aplicacion.get('contraido', 'sin contraido')}")
 
                     ventana_arqueo.send_keys(keys="{Tab}{Tab}{Tab}", wait_time=0.02, interval=0.02)
                     ventana_arqueo.send_keys(
