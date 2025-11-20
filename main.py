@@ -2,7 +2,7 @@
 import logging
 from arqueo_task_consumer import ArqueoConsumer
 
-def setup_logger(name: str = 'Sical arqueos', level: int = logging.INFO) -> logging.Logger:
+def setup_logger(name: str = 'Sical arqueos', level: int = logging.DEBUG) -> logging.Logger:
     """Setup a simple console logger"""
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -20,7 +20,7 @@ def setup_logger(name: str = 'Sical arqueos', level: int = logging.INFO) -> logg
     return logger
 
 def main():
-    logger = setup_logger(name="Sical arqueos", level=logging.INFO)
+    logger = setup_logger(name="Sical arqueos", level=logging.DEBUG)
     consumer = ArqueoConsumer()
     try:
         print("init...")

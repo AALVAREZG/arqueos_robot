@@ -100,17 +100,18 @@ CONSULTA_FORM_PATHS = {
 # =============================================================================
 
 FILTROS_FORM_PATHS = {
-    'tercero': 'class:"TEdit" and path:"2|34"',
-    'fecha_desde': 'control:"EditControl" and path:"2|29"',
-    'fecha_hasta': 'control:"EditControl" and path:"2|18"',
-    'funcional': 'class:"TEdit" and path:"2|39"',
-    'economica': 'class:"TEdit" and path:"2|38"',
     'arqueos_option': 'class:"TGroupButton" and name:"Arqueos"',
+    'tercero': 'class:"TEdit" and path:"2|29"',
+    'fecha_desde': 'control:"EditControl" and path:"2|24"',
+    'fecha_hasta': 'control:"EditControl" and path:"2|17"',
+    'funcional': 'class:"TEdit" and path:"2|34"',
+    'economica': 'class:"TEdit" and path:"2|33"',
     'importe_desde': 'class:"TEdit" and path:"2|5"',
     'importe_hasta': 'class:"TEdit" and path:"2|4"',
-    'caja': 'class:"Edit" and path:"2|16|1"',
+    'caja': 'class:"Edit" and path:"2|15|1"',
     'consultar_button': 'class:"TBitBtn" and name:"Consultar"',
     'num_registros': 'class:"TEdit" and path:"1|1|2"',
+    'texto_operacion': 'class:"TEdit" and path:"2|14"',
     'cerrar_button': 'control:"ButtonControl" and name:"Cerrar"',
 }
 
@@ -264,7 +265,7 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
 
         time.sleep(0.5)
 
-        filtros_window = windows.find_window(SICAL_WINDOWS['filtros'], timeout=2.0, raise_error=False)
+        filtros_window = windows.find_window(SICAL_WINDOWS['filtros'], timeout=8.0, raise_error=False)
 
         if not filtros_window:
             result.status = OperationStatus.FAILED
@@ -275,7 +276,7 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
         wait_time = 0.02
         interval = 0.02
         # Arqueo operation type
-        arqueo_option = filtros_window.fint(FILTROS_FORM_PATHS['arqueos_option'])
+        arqueo_option = filtros_window.find(FILTROS_FORM_PATHS['arqueos_option'])
         arqueo_option.click()
 
         # Tercero
@@ -298,7 +299,11 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
         caja_field.click()
         caja_field.send_keys(datos_arqueo['caja'], interval=0.01, wait_time=wait_time, send_enter=True)
 
-        # Partida and Amount (first aplicacion)
+        # Total of aplicaciones
+        if TASK_CALLBACK:
+            _text = f'processing aplicaciones: {datos_arqueo.get("aplicaciones")}'
+            TASK_CALLBACK('step', step=_text)
+        
         if datos_arqueo.get('aplicaciones') and len(datos_arqueo['aplicaciones']) > 0:
             total_importe = sum(
                 float(app['importe'].replace(',', '.'))
@@ -310,15 +315,19 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
             result.error = 'Total aplicaciones calculado == 0'
             return result
 
+        if isinstance(total_importe, (int, float)):
+            total_importe_str = str(total_importe).replace('.', ',')
+        else:
+            total_importe_str = str(total_importe)
         
         # Amount range
         importe_desde = filtros_window.find(FILTROS_FORM_PATHS['importe_desde'])
         importe_desde.double_click()
-        importe_desde.send_keys(total_importe, interval=0.01, wait_time=wait_time, send_enter=True)
+        importe_desde.send_keys(total_importe_str, interval=0.01, wait_time=wait_time, send_enter=True)
 
         importe_hasta = filtros_window.find(FILTROS_FORM_PATHS['importe_hasta'])
         importe_hasta.double_click()
-        importe_hasta.send_keys(total_importe, interval=0.01, wait_time=wait_time, send_enter=True)
+        importe_hasta.send_keys(total_importe_str, interval=0.01, wait_time=wait_time, send_enter=True)
 
         
 
@@ -465,6 +474,7 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
         result = process_arqueo_operation(window_manager.ventana_arqueo, datos_arqueo, result)
 
 
+
     except Exception as e:
         arqueo_logger.exception("Error in arqueo operation")
         result.status = OperationStatus.FAILED
@@ -475,7 +485,7 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
     
     finally:
         # Cleanup
-        arqueo_logger.info("Finalize manually until develop is complete")
+        # arqueo_logger.info("Finalize manually until develop is complete")
         #window_manager.close_window()
 
         # Calculate duration
@@ -498,7 +508,9 @@ def create_arqueo_data(operation_data: Dict[str, Any]) -> Dict[str, Any]:
 
     # Check if operation should be finalized (ends with _FIN)
     texto_operacion, finalizar_operacion = check_finalize_flag(texto_operacion)
-
+    arqueo_logger.debug("finalizar operacion?...")
+    arqueo_logger.debug(finalizar_operacion)
+    
     return {
         'fecha': operation_data.get('fecha'),
         'caja': operation_data.get('caja'),
@@ -606,12 +618,15 @@ def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
     try:
         # Phase 1: Initialize form and fill data
         # Note: Duplicate check is now performed in operacion_arqueo() before opening this window
-        arqueo_logger.info('Initializing form and filling data')
+        arqueo_logger.debug('Initializing form and filling data')
         ventana_arqueo.find('path:"2|4"').click()  # New button
         ventana_arqueo.find('class:"TButton" and path:"1|2"').click()  # Confirm
 
         # Fill main data
+        arqueo_logger.warning('Trying to filling data')
         fill_main_panel_data(ventana_arqueo, datos_arqueo, result)
+        arqueo_logger.warning('finished to filling data') 
+        arqueo_logger.warning(f'result status: {str(result.status)}')
 
         if result.status != OperationStatus.FAILED:
             result.status = OperationStatus.COMPLETED
@@ -631,7 +646,7 @@ def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
                     TASK_CALLBACK('step', step='Printing operation document')
                 result = print_operation_document(ventana_arqueo, result)
         else:
-            arqueo_logger.info('Operation filled but not finalized (no _FIN suffix)')
+            arqueo_logger.debug('Operation filled but not finalized (no _FIN suffix)')
 
     except Exception as e:
         arqueo_logger.exception('Error in process_arqueo_operation')
@@ -790,12 +805,12 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
                             wait_time=default_wait_time,
                             send_enter=False,
                         )
-                        ventana_arqueo.send_keys(keys="{Enter}", wait_time=default_wait_time)
-                        time.sleep(
-                            2.0
-                        )  # introduzco un delay porque la opción timeout de wait no funciona
-                        windows.wait_for_condition(new_button_element.is_disposed)
-                        break
+                        #hacemos enter para aceptar la casilla cuenta
+                        ventana_arqueo.send_keys(keys="{Enter}", wait_time=0.02)
+                        check_button_element = ventana_arqueo.find('path:"3|2|4"').click()
+                        suma_aplicaciones = suma_aplicaciones + float(
+                            aplicacion["importe"].replace(",", ".")
+                        )
 
                 elif (naturaleza_operacion == '5'):
                     ventana_arqueo.send_keys(
@@ -839,26 +854,25 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
                         wait_time=0.02,
                         send_enter=False,
                     )
+                    #hacemos enter para aceptar la casilla cuenta
                     ventana_arqueo.send_keys(keys="{Enter}", wait_time=0.02)
+                    check_button_element = ventana_arqueo.find('path:"3|2|4"').click()
+                    suma_aplicaciones = suma_aplicaciones + float(
+                        aplicacion["importe"].replace(",", ".")
+                    )
 
                 else: 
                     arqueo_logger.info(f"otra NATURALEZA ?? ... {naturaleza_operacion} ")   
                 
-                
-                ventana_arqueo.send_keys(keys=aplicacion["cuenta"], interval=0.02, wait_time=0.02)
-                ckeck_button_element = ventana_arqueo.find('path:"3|2|4"').click()
+        total_aplicaciones = ventana_arqueo.find('path:"3|3|1"').get_value().replace(",", ".")
 
-                suma_aplicaciones = suma_aplicaciones + float(
-                    aplicacion["importe"].replace(",", ".")
-                )
-
-            total_operacion = ventana_arqueo.find('path:"3|3|4"').get_value().replace(",", ".")
-
-        result.total_operacion = total_operacion
+        result.total_operacion = total_aplicaciones
         result.suma_aplicaciones = suma_aplicaciones
         
 
     except Exception as e:
+        arqueo_logger.critical("Exception fillling operation data")
+        arqueo_logger
         result.status = OperationStatus.FAILED
         result.error = f"Validation error: {str(e)}"
     
