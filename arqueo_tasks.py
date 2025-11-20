@@ -61,49 +61,69 @@ FAILED_DIR = os.path.join(DATA_DIR, 'z_failed')
 SICAL_WINDOWS = {
     'main_menu': 'regex:.*FMenuSical',
     'arqueo': 'regex:.*SICAL II 4.2 mtec40',
-    'consulta': 'regex:.*FConsulta.*Operaciones',
-    'filtros': 'regex:.*FFiltrosAvanzados',
-    'confirm_dialog': 'regex:.*Confirmación',
-    'information_dialog': 'regex:.*Información',
-    'error_dialog': 'regex:.*Error',
-    'visual_documentos': 'regex:.*Visualizador de Documentos de SICAL v2'
+    'ado220': 'regex:.*SICAL II 4.2 new30',
+    'pmp450': 'regex:.*SICAL II 4.2 new30',  # TODO: Update when PMP450 window pattern is known
+    'consulta': 'regex:.*SICAL II 4.2 ConOpera',
+    'tesoreria': 'regex:.*SICAL II 4.2 TesPagos',
+    'filtros': 'regex:.*SICAL II 4.2 FilOpera',
+    'confirm_dialog': 'regex:.*Confirm',
+    'information_dialog': 'regex:.*Information',
+    'error_dialog': 'regex:.*mtec40',
+    'visual_documentos': 'regex:.*Visualizador de Documentos de SICAL v2',
+    'print_dialog': 'regex:.*Imprimir',
 }
 
 # SICAL Menu Paths
-MENU_PATH_CONSULTA = (
-    'CONSULTAS AVANZADAS',
-    'PRESUPUESTARIAS',
-    'CONSULTA DE OPERACIONES'
-)
+SICAL_MENU_PATHS = {
+    'ado220': ('GASTOS', 'OPERACIONES DE PRESUPUESTO CORRIENTE'),
+    'pmp450': ('GASTOS', 'OPERACIONES DE PRESUPUESTO CORRIENTE'),  # TODO: Verify actual path for PMP450
+    'consulta': ('CONSULTAS AVANZADAS', 'CONSULTA DE OPERACIONES'),
+    'tesoreria_pagos': ('TESORERIA', 'GESTION DE PAGOS', 'PROCESO DE ORDENACION Y PAGO'),
+    'arqueo': ('TESORERIA', 'GESTION DE COBROS', 'ARQUEOS. APLICACION DIRECTA',
+               'TRATAMIENTO INDIVIDUALIZADO/RESUMEN'),
+}
 
-# Consulta Form Paths
+# =============================================================================
+# CONSULTA OPERATION PATHS - UI element locators for consultation window
+# =============================================================================
+
 CONSULTA_FORM_PATHS = {
-    'filtros_button': 'path:"2|2|1"',
-    'id_operacion': 'path:"3|2|3"',
-    'imprimir_button': 'path:"2|7"',
-    'estado_documento': 'path:"3|2|5"',
-    'salir_button': 'path:"2|10"'
+    'id_operacion': 'class:"TEdit" and path:"1|38"',
+    'imprimir_button': 'class:"TBitBtn" and name:"Imprimir"',
+    'estado_documento': 'class:"TEdit" and path:"1|3"',
+    'filtros_button': 'class:"TBitBtn" and name:"Filtros"',
+    'salir_button': 'class:"TBitBtn" and name:"Salir"',
 }
 
-# Filtros Form Paths
+# =============================================================================
+# FILTROS OPERATION PATHS - UI element locators for filters window
+# =============================================================================
+
 FILTROS_FORM_PATHS = {
-    'tercero': 'path:"3|1|1|1|6"',
-    'fecha_desde': 'path:"3|1|1|1|3"',
-    'fecha_hasta': 'path:"3|1|1|1|5"',
-    'partida': 'path:"3|1|1|1|11"',
-    'importe_desde': 'path:"3|1|1|1|15"',
-    'importe_hasta': 'path:"3|1|1|1|17"',
-    'caja': 'path:"3|1|1|1|8"',
-    'consultar_button': 'path:"2|2"',
-    'cerrar_button': 'path:"2|5"',
-    'num_registros': 'path:"3|2|2"'
+    'tercero': 'class:"TEdit" and path:"2|34"',
+    'fecha_desde': 'control:"EditControl" and path:"2|29"',
+    'fecha_hasta': 'control:"EditControl" and path:"2|18"',
+    'funcional': 'class:"TEdit" and path:"2|39"',
+    'economica': 'class:"TEdit" and path:"2|38"',
+    'importe_desde': 'class:"TEdit" and path:"2|5"',
+    'importe_hasta': 'class:"TEdit" and path:"2|4"',
+    'caja': 'class:"Edit" and path:"2|16|1"',
+    'consultar_button': 'class:"TBitBtn" and name:"Consultar"',
+    'num_registros': 'class:"TEdit" and path:"1|1|2"',
+    'cerrar_button': 'control:"ButtonControl" and name:"Cerrar"',
 }
 
-# Visual Documentos Paths
+
+# =============================================================================
+# VISUAL DOCUMENTOS PATHS - UI element locators for document viewer
+# =============================================================================
+
 VISUAL_DOCUMENTOS_PATHS = {
-    'imprimir_button': 'path:"2|2|6"',
-    'salir_button': 'path:"2|2|5"'
+    'imprimir_button': 'class:"TBitBtn" and path:"2|2|7"',
+    'guardar_pdf_button': 'class:"TBitBtn" and path:"2|2|3"',
+    'salir_button': 'class:"TBitBtn" and path:"2|2|6"',
 }
+
 
 # Common Dialog Paths
 COMMON_DIALOG_PATHS = {
@@ -219,7 +239,7 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
 
     try:
         # Setup consulta window
-        if not abrir_ventana_opcion_en_menu(MENU_PATH_CONSULTA):
+        if not abrir_ventana_opcion_en_menu(SICAL_MENU_PATHS.get('consulta', None)):
             result.status = OperationStatus.FAILED
             result.error = 'Failed to open Consulta window'
             return result
@@ -233,7 +253,14 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
             return result
 
         # Open filters window
-        ventana_consulta.find(CONSULTA_FORM_PATHS['filtros_button']).click()
+        filtros_btton = ventana_consulta.find(CONSULTA_FORM_PATHS['filtros_button'],timeout=2.0, raise_error=False)
+        if not filtros_btton:
+            result.status = OperationStatus.FAILED
+            result.error = 'Filtros button not found'
+            return result
+        else:
+            filtros_btton.click()
+
         time.sleep(0.5)
 
         filtros_window = windows.find_window(SICAL_WINDOWS['filtros'], timeout=2.0, raise_error=False)
@@ -262,6 +289,11 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
         to_date_field.double_click()
         to_date_field.send_keys(fecha, interval=0.01, wait_time=wait_time, send_enter=True)
 
+        # Caja
+        caja_field = filtros_window.find(FILTROS_FORM_PATHS['caja'])
+        caja_field.click()
+        caja_field.send_keys(datos_arqueo['caja'], interval=0.01, wait_time=wait_time, send_enter=True)
+
         # Partida and Amount (first aplicacion)
         if datos_arqueo.get('aplicaciones') and len(datos_arqueo['aplicaciones']) > 0:
             first_app = datos_arqueo['aplicaciones'][0]
@@ -279,10 +311,7 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
             importe_hasta.double_click()
             importe_hasta.send_keys(first_app['importe'], interval=0.01, wait_time=wait_time, send_enter=True)
 
-        # Caja
-        caja_field = filtros_window.find(FILTROS_FORM_PATHS['caja'])
-        caja_field.click()
-        caja_field.send_keys(datos_arqueo['caja'], interval=0.01, wait_time=wait_time, send_enter=True)
+        
 
         # Execute search
         filtros_window.find(FILTROS_FORM_PATHS['consultar_button']).click()
