@@ -105,6 +105,7 @@ FILTROS_FORM_PATHS = {
     'fecha_hasta': 'control:"EditControl" and path:"2|18"',
     'funcional': 'class:"TEdit" and path:"2|39"',
     'economica': 'class:"TEdit" and path:"2|38"',
+    'arqueos_option': 'class:"TGroupButton" and name:"Arqueos"',
     'importe_desde': 'class:"TEdit" and path:"2|5"',
     'importe_hasta': 'class:"TEdit" and path:"2|4"',
     'caja': 'class:"Edit" and path:"2|16|1"',
@@ -245,7 +246,7 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
             return result
 
         time.sleep(1.0)
-        ventana_consulta = windows.find_window(SICAL_WINDOWS['consulta'], timeout=2.0, raise_error=False)
+        ventana_consulta = windows.find_window(SICAL_WINDOWS['consulta'], timeout=8.0, raise_error=False)
 
         if not ventana_consulta:
             result.status = OperationStatus.FAILED
@@ -273,6 +274,9 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
         # Fill filter criteria
         wait_time = 0.02
         interval = 0.02
+        # Arqueo operation type
+        arqueo_option = filtros_window.fint(FILTROS_FORM_PATHS['arqueos_option'])
+        arqueo_option.click()
 
         # Tercero
         tercero_field = filtros_window.find(FILTROS_FORM_PATHS['tercero'])
@@ -296,20 +300,25 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
 
         # Partida and Amount (first aplicacion)
         if datos_arqueo.get('aplicaciones') and len(datos_arqueo['aplicaciones']) > 0:
-            first_app = datos_arqueo['aplicaciones'][0]
+            total_importe = sum(
+                float(app['importe'].replace(',', '.'))
+                for app in datos_arqueo.get('aplicaciones')
+            )
+        else:
+            total_importe=0.0
+            result.status = OperationStatus.FAILED
+            result.error = 'Total aplicaciones calculado == 0'
+            return result
 
-            partida_field = filtros_window.find(FILTROS_FORM_PATHS['partida'])
-            partida_field.double_click()
-            partida_field.send_keys(first_app['partida'], interval=0.01, wait_time=wait_time, send_enter=True)
+        
+        # Amount range
+        importe_desde = filtros_window.find(FILTROS_FORM_PATHS['importe_desde'])
+        importe_desde.double_click()
+        importe_desde.send_keys(total_importe, interval=0.01, wait_time=wait_time, send_enter=True)
 
-            # Amount range
-            importe_desde = filtros_window.find(FILTROS_FORM_PATHS['importe_desde'])
-            importe_desde.double_click()
-            importe_desde.send_keys(first_app['importe'], interval=0.01, wait_time=wait_time, send_enter=True)
-
-            importe_hasta = filtros_window.find(FILTROS_FORM_PATHS['importe_hasta'])
-            importe_hasta.double_click()
-            importe_hasta.send_keys(first_app['importe'], interval=0.01, wait_time=wait_time, send_enter=True)
+        importe_hasta = filtros_window.find(FILTROS_FORM_PATHS['importe_hasta'])
+        importe_hasta.double_click()
+        importe_hasta.send_keys(total_importe, interval=0.01, wait_time=wait_time, send_enter=True)
 
         
 
