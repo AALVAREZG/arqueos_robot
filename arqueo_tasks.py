@@ -57,6 +57,61 @@ PENDING_DIR = os.path.join(DATA_DIR, 'pending')
 PROCESSED_DIR = os.path.join(DATA_DIR, 'processed')
 FAILED_DIR = os.path.join(DATA_DIR, 'z_failed')
 
+# SICAL Window Patterns
+SICAL_WINDOWS = {
+    'main_menu': 'regex:.*FMenuSical',
+    'arqueo': 'regex:.*SICAL II 4.2 mtec40',
+    'consulta': 'regex:.*FConsulta.*Operaciones',
+    'filtros': 'regex:.*FFiltrosAvanzados',
+    'confirm_dialog': 'regex:.*Confirmación',
+    'information_dialog': 'regex:.*Información',
+    'error_dialog': 'regex:.*Error',
+    'visual_documentos': 'regex:.*Visualizador de Documentos de SICAL v2'
+}
+
+# SICAL Menu Paths
+MENU_PATH_CONSULTA = (
+    'CONSULTAS AVANZADAS',
+    'PRESUPUESTARIAS',
+    'CONSULTA DE OPERACIONES'
+)
+
+# Consulta Form Paths
+CONSULTA_FORM_PATHS = {
+    'filtros_button': 'path:"2|2|1"',
+    'id_operacion': 'path:"3|2|3"',
+    'imprimir_button': 'path:"2|7"',
+    'estado_documento': 'path:"3|2|5"',
+    'salir_button': 'path:"2|10"'
+}
+
+# Filtros Form Paths
+FILTROS_FORM_PATHS = {
+    'tercero': 'path:"3|1|1|1|6"',
+    'fecha_desde': 'path:"3|1|1|1|3"',
+    'fecha_hasta': 'path:"3|1|1|1|5"',
+    'partida': 'path:"3|1|1|1|11"',
+    'importe_desde': 'path:"3|1|1|1|15"',
+    'importe_hasta': 'path:"3|1|1|1|17"',
+    'caja': 'path:"3|1|1|1|8"',
+    'consultar_button': 'path:"2|2"',
+    'cerrar_button': 'path:"2|5"',
+    'num_registros': 'path:"3|2|2"'
+}
+
+# Visual Documentos Paths
+VISUAL_DOCUMENTOS_PATHS = {
+    'imprimir_button': 'path:"2|2|6"',
+    'salir_button': 'path:"2|2|5"'
+}
+
+# Common Dialog Paths
+COMMON_DIALOG_PATHS = {
+    'ok_button': 'path:"1|1"',
+    'yes_button': 'path:"1|2"',
+    'no_button': 'path:"1|3"'
+}
+
 
 # Configure logging
 logging.basicConfig(
@@ -67,6 +122,23 @@ logging.basicConfig(
 # Get logger instance
 arqueo_logger = logging.getLogger(__name__)
 
+# Finalization flag constant
+FINALIZE_SUFFIX = '_FIN'
+
+def check_finalize_flag(texto: str) -> tuple:
+    """
+    Check if operation text ends with finalize flag and extract clean text.
+
+    Args:
+        texto: Operation text that may contain _FIN suffix
+
+    Returns:
+        Tuple of (cleaned_text, should_finalize)
+    """
+    if texto and texto.endswith(FINALIZE_SUFFIX):
+        return texto[:-len(FINALIZE_SUFFIX)].strip(), True
+    return texto, False
+
 # 1. First, make the Enum JSON-serializable
 class OperationStatus(Enum):
     PENDING = "PENDING"
@@ -74,6 +146,7 @@ class OperationStatus(Enum):
     COMPLETED = "COMPLETED"
     INCOMPLETED = "INCOMPLETED"
     FAILED = "FAILED"
+    P_DUPLICATED = "P_DUPLICATED"  # Possible duplicate detected
 
     def to_json(self):
         """Convert enum to string for JSON serialization"""
@@ -94,7 +167,8 @@ class OperationEncoder(json.JSONEncoder):
                 'num_operacion': obj.num_operacion,
                 'total_operacion': obj.total_operacion,
                 'suma_aplicaciones': obj.suma_aplicaciones,
-                'sical_is_open': obj.sical_is_open
+                'sical_is_open': obj.sical_is_open,
+                'similiar_records_encountered': obj.similiar_records_encountered
             }
         return super().default(obj)
 
@@ -109,14 +183,15 @@ class OperationResult:
     total_operacion: Optional[float] = None
     suma_aplicaciones: Optional[float] = None
     sical_is_open: bool = False
+    similiar_records_encountered: int = 0
 
 class SicalWindowManager:
     def __init__(self):
         self.ventana_arqueo = None
-        
+
     def find_arqueo_window(self):
         return windows.find_window('regex:.*SICAL II 4.2 mtec40', raise_error=False)
-    
+
     def close_window(self):
         if self.ventana_arqueo:
             try:
@@ -126,6 +201,154 @@ class SicalWindowManager:
                     self.ventana_arqueo.find('class:"TButton" and name:"No"').click()
             except Exception as e:
                 arqueo_logger.exception("Error closing window: %s", str(e))
+
+def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult) -> OperationResult:
+    """
+    Check for duplicate operations using the Consulta window.
+
+    Args:
+        datos_arqueo: Operation data to search for
+        result: Current operation result
+
+    Returns:
+        Updated operation result with duplicate check status
+    """
+    arqueo_logger.info('Checking for duplicate operations')
+    if TASK_CALLBACK:
+        TASK_CALLBACK('step', step='Checking for duplicate operations')
+
+    try:
+        # Setup consulta window
+        if not abrir_ventana_opcion_en_menu(MENU_PATH_CONSULTA):
+            result.status = OperationStatus.FAILED
+            result.error = 'Failed to open Consulta window'
+            return result
+
+        time.sleep(1.0)
+        ventana_consulta = windows.find_window(SICAL_WINDOWS['consulta'], timeout=2.0, raise_error=False)
+
+        if not ventana_consulta:
+            result.status = OperationStatus.FAILED
+            result.error = 'Consulta window not found'
+            return result
+
+        # Open filters window
+        ventana_consulta.find(CONSULTA_FORM_PATHS['filtros_button']).click()
+        time.sleep(0.5)
+
+        filtros_window = windows.find_window(SICAL_WINDOWS['filtros'], timeout=2.0, raise_error=False)
+
+        if not filtros_window:
+            result.status = OperationStatus.FAILED
+            result.error = 'Failed to open Filters window'
+            return result
+
+        # Fill filter criteria
+        wait_time = 0.02
+        interval = 0.02
+
+        # Tercero
+        tercero_field = filtros_window.find(FILTROS_FORM_PATHS['tercero'])
+        tercero_field.double_click()
+        tercero_field.send_keys(datos_arqueo['tercero'], interval=interval, wait_time=wait_time, send_enter=True)
+
+        # Date range (same date for from and to)
+        fecha = datos_arqueo['fecha']
+        from_date_field = filtros_window.find(FILTROS_FORM_PATHS['fecha_desde'])
+        from_date_field.double_click()
+        from_date_field.send_keys(fecha, interval=0.01, wait_time=wait_time, send_enter=True)
+
+        to_date_field = filtros_window.find(FILTROS_FORM_PATHS['fecha_hasta'])
+        to_date_field.double_click()
+        to_date_field.send_keys(fecha, interval=0.01, wait_time=wait_time, send_enter=True)
+
+        # Partida and Amount (first aplicacion)
+        if datos_arqueo.get('aplicaciones') and len(datos_arqueo['aplicaciones']) > 0:
+            first_app = datos_arqueo['aplicaciones'][0]
+
+            partida_field = filtros_window.find(FILTROS_FORM_PATHS['partida'])
+            partida_field.double_click()
+            partida_field.send_keys(first_app['partida'], interval=0.01, wait_time=wait_time, send_enter=True)
+
+            # Amount range
+            importe_desde = filtros_window.find(FILTROS_FORM_PATHS['importe_desde'])
+            importe_desde.double_click()
+            importe_desde.send_keys(first_app['importe'], interval=0.01, wait_time=wait_time, send_enter=True)
+
+            importe_hasta = filtros_window.find(FILTROS_FORM_PATHS['importe_hasta'])
+            importe_hasta.double_click()
+            importe_hasta.send_keys(first_app['importe'], interval=0.01, wait_time=wait_time, send_enter=True)
+
+        # Caja
+        caja_field = filtros_window.find(FILTROS_FORM_PATHS['caja'])
+        caja_field.click()
+        caja_field.send_keys(datos_arqueo['caja'], interval=0.01, wait_time=wait_time, send_enter=True)
+
+        # Execute search
+        filtros_window.find(FILTROS_FORM_PATHS['consultar_button']).click()
+        time.sleep(1.0)
+
+        # Check for results
+        modal_error = filtros_window.find(
+            'class:"TMessageForm" and name:"Error"',
+            timeout=1.5,
+            raise_error=False
+        )
+
+        if not modal_error:
+            # Records found - potential duplicate
+            num_registros_element = filtros_window.find(FILTROS_FORM_PATHS['num_registros'], raise_error=False)
+            if num_registros_element:
+                num_registros = num_registros_element.get_value()
+                arqueo_logger.warning(f'Found {num_registros} similar records - possible duplicate')
+                result.similiar_records_encountered = int(num_registros) if num_registros else 0
+            else:
+                result.similiar_records_encountered = 1  # At least one found
+
+            result.status = OperationStatus.P_DUPLICATED
+            result.error = f'Possible duplicate operation found, similar records: {result.similiar_records_encountered}'
+
+            # Close filters window
+            try:
+                filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
+            except:
+                pass
+
+            # Close consulta window
+            try:
+                ventana_consulta.find(CONSULTA_FORM_PATHS['salir_button']).click()
+            except:
+                pass
+
+            arqueo_logger.warning(f'Duplicate check failed: {result.error}')
+
+        else:
+            # No records found - safe to proceed
+            result.similiar_records_encountered = 0
+            arqueo_logger.info('No similar records found - proceeding with operation')
+
+            # Close error dialog
+            filtros_window.find(COMMON_DIALOG_PATHS['ok_button']).click()
+            time.sleep(0.2)
+
+            # Close filters window
+            filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
+            time.sleep(0.2)
+
+            # Close consulta window
+            ventana_consulta.find(CONSULTA_FORM_PATHS['salir_button']).click()
+            time.sleep(0.2)
+
+    except windows.ElementNotFound as e:
+        arqueo_logger.error(f'Element not found during duplicate check: {e}')
+        result.status = OperationStatus.FAILED
+        result.error = f'Duplicate check error: {str(e)}'
+    except Exception as e:
+        arqueo_logger.error(f'Error checking for duplicates: {e}')
+        result.status = OperationStatus.FAILED
+        result.error = f'Duplicate check error: {str(e)}'
+
+    return result
 
 @task
 def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
@@ -179,25 +402,13 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
             result.sical_is_open = True
             result.status = OperationStatus.IN_PROGRESS
 
-        # Process operation
+        # Process operation (includes duplicate check, validation, and printing if _FIN flag is set)
         if TASK_CALLBACK:
             TASK_CALLBACK('step', step='Processing arqueo operation')
 
         result = process_arqueo_operation(window_manager.ventana_arqueo, datos_arqueo, result)
 
-        if result.status == OperationStatus.COMPLETED:
-            # Validate and finalize
-            if TASK_CALLBACK:
-                TASK_CALLBACK('step', step='Validating operation')
-            ##result = validate_operation(window_manager.ventana_arqueo, result)
-            pass
-            if result.status == OperationStatus.COMPLETED:
-                if TASK_CALLBACK:
-                    TASK_CALLBACK('step', step='Finalizing operation')
-                ## result = print_operation_document(window_manager.ventana_arqueo, result)
-                pass
 
-        
     except Exception as e:
         arqueo_logger.exception("Error in arqueo operation")
         result.status = OperationStatus.FAILED
@@ -229,13 +440,21 @@ def create_arqueo_data(operation_data: Dict[str, Any]) -> Dict[str, Any]:
     # Extract aplicaciones from new structure
     aplicaciones_data = operation_data.get('aplicaciones', [])
 
+    # Extract texto and check for finalization flag
+    texto_sical = operation_data.get('texto_sical', [{}])
+    texto_operacion = texto_sical[0].get('tcargo', '') if texto_sical else ''
+
+    # Check if operation should be finalized (ends with _FIN)
+    texto_operacion, finalizar_operacion = check_finalize_flag(texto_operacion)
+
     return {
         'fecha': operation_data.get('fecha'),
         'caja': operation_data.get('caja'),
         'expediente': operation_data.get('expediente', 'rbt-apunte-arqueo'),
         'tercero': operation_data.get('tercero'),
         'naturaleza': operation_data.get('naturaleza', '4'),
-        'resumen': operation_data.get('texto_sical', [{}])[0].get('tcargo'),
+        'resumen': texto_operacion,
+        'finalizar_operacion': finalizar_operacion,
         'aplicaciones': create_aplicaciones(aplicaciones_data),
         'descuentos': operation_data.get('descuentos', []),
         'aux_data': operation_data.get('aux_data', {}),
@@ -324,26 +543,63 @@ def setup_sical_window(window_manager: SicalWindowManager) -> bool:
     window_manager.ventana_arqueo = window_manager.find_arqueo_window()
     return bool(window_manager.ventana_arqueo)
 
-def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any], 
+def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
                            result: OperationResult) -> OperationResult:
     """Process the arqueo operation in SICAL"""
     arqueo_logger.info('Processing arqueo operation...')
+    finalizar_operacion = datos_arqueo.get('finalizar_operacion', False)
+
+    arqueo_logger.info(f'Finalizar operation flag: {finalizar_operacion}')
+
     try:
-        # Initialize form
+        # Phase 1: Check for duplicates if finalizing
+        if finalizar_operacion:
+            arqueo_logger.info('Operation marked for finalization - checking for duplicates')
+            result = _check_for_duplicates(datos_arqueo, result)
+
+            # If duplicates found, abort the operation
+            if result.status == OperationStatus.P_DUPLICATED:
+                arqueo_logger.warning('Duplicate detected - aborting operation')
+                return result
+
+            # If duplicate check failed, abort
+            if result.status == OperationStatus.FAILED:
+                arqueo_logger.error('Duplicate check failed - aborting operation')
+                return result
+
+        # Phase 2: Initialize form and fill data
+        arqueo_logger.info('Initializing form and filling data')
         ventana_arqueo.find('path:"2|4"').click()  # New button
         ventana_arqueo.find('class:"TButton" and path:"1|2"').click()  # Confirm
-        
+
         # Fill main data
         fill_main_panel_data(ventana_arqueo, datos_arqueo, result)
-        
-                
+
         if result.status != OperationStatus.FAILED:
             result.status = OperationStatus.COMPLETED
-            
+
+        # Phase 3: Validate and finalize if requested
+        if result.status == OperationStatus.COMPLETED and finalizar_operacion:
+            arqueo_logger.info('Validating and finalizing operation')
+
+            # Validate operation
+            if TASK_CALLBACK:
+                TASK_CALLBACK('step', step='Validating operation')
+            result = validate_operation(ventana_arqueo, result)
+
+            # Print document if validation succeeded
+            if result.status == OperationStatus.COMPLETED:
+                if TASK_CALLBACK:
+                    TASK_CALLBACK('step', step='Printing operation document')
+                result = print_operation_document(ventana_arqueo, result)
+        else:
+            arqueo_logger.info('Operation filled but not finalized (no _FIN suffix)')
+
     except Exception as e:
+        arqueo_logger.exception('Error in process_arqueo_operation')
         result.status = OperationStatus.FAILED
         result.error = str(e)
-    
+
     return result
 
 def abrir_ventana_opcion_en_menu(menu_a_buscar):
