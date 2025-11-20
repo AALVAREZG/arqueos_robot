@@ -418,6 +418,24 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
         datos_arqueo = create_arqueo_data(detalle)
         arqueo_logger.debug('Created arqueo data: %s', datos_arqueo)
 
+        # Check for duplicates BEFORE opening arqueo window (if finalization flag is set)
+        finalizar_operacion = datos_arqueo.get('finalizar_operacion', False)
+        if finalizar_operacion:
+            arqueo_logger.info('Operation marked for finalization - checking for duplicates before opening window')
+            result = _check_for_duplicates(datos_arqueo, result)
+
+            # If duplicates found or check failed, abort before opening window
+            if result.status == OperationStatus.P_DUPLICATED:
+                arqueo_logger.warning('Duplicate detected - aborting operation without opening arqueo window')
+                return result
+
+            if result.status == OperationStatus.FAILED:
+                arqueo_logger.error('Duplicate check failed - aborting operation without opening arqueo window')
+                return result
+
+            # Reset status to continue with operation
+            result.status = OperationStatus.PENDING
+
         # Setup SICAL window
         if TASK_CALLBACK:
             TASK_CALLBACK('step', step='Opening SICAL window')
@@ -430,7 +448,8 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
             result.sical_is_open = True
             result.status = OperationStatus.IN_PROGRESS
 
-        # Process operation (includes duplicate check, validation, and printing if _FIN flag is set)
+        # Process operation (includes validation and printing if _FIN flag is set)
+        # Note: Duplicate check is now performed above, before opening the window
         if TASK_CALLBACK:
             TASK_CALLBACK('step', step='Processing arqueo operation')
 
@@ -576,22 +595,8 @@ def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
     arqueo_logger.info(f'Finalizar operation flag: {finalizar_operacion}')
 
     try:
-        # Phase 1: Check for duplicates if finalizing
-        if finalizar_operacion:
-            arqueo_logger.info('Operation marked for finalization - checking for duplicates')
-            result = _check_for_duplicates(datos_arqueo, result)
-
-            # If duplicates found, abort the operation
-            if result.status == OperationStatus.P_DUPLICATED:
-                arqueo_logger.warning('Duplicate detected - aborting operation')
-                return result
-
-            # If duplicate check failed, abort
-            if result.status == OperationStatus.FAILED:
-                arqueo_logger.error('Duplicate check failed - aborting operation')
-                return result
-
-        # Phase 2: Initialize form and fill data
+        # Phase 1: Initialize form and fill data
+        # Note: Duplicate check is now performed in operacion_arqueo() before opening this window
         arqueo_logger.info('Initializing form and filling data')
         ventana_arqueo.find('path:"2|4"').click()  # New button
         ventana_arqueo.find('class:"TButton" and path:"1|2"').click()  # Confirm
@@ -602,7 +607,7 @@ def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
         if result.status != OperationStatus.FAILED:
             result.status = OperationStatus.COMPLETED
 
-        # Phase 3: Validate and finalize if requested
+        # Phase 2: Validate and finalize if requested
         if result.status == OperationStatus.COMPLETED and finalizar_operacion:
             arqueo_logger.info('Validating and finalizing operation')
 
