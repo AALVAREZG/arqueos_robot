@@ -905,7 +905,7 @@ def validate_operation(ventana_arqueo, result: OperationResult) -> OperationResu
 def print_operation_document(ventana_arqueo, result: OperationResult) -> OperationResult:
     """Print TALÓN DE CARGO in SICAL"""
     try:
-        ventana_arqueo.find('class:"TBitBtn" and name:"Documento" and path:"2|3"').click()
+        ventana_arqueo.find('class:"TBitBtn" and name:"Documento"').click()
         time.sleep(3) # Wait for Seleccion Tipo doc to load
         ventana_seleccion_tipo_doc = windows.find_window('regex:.*FseleccionTipoDoc')
         ventana_seleccion_tipo_doc.find('class:"TCheckBox" and path:"1|3" and name:"Talón de Cargo"').click()
@@ -926,7 +926,7 @@ def print_operation_document(ventana_arqueo, result: OperationResult) -> Operati
         return result
     
     except Exception as e:
-        result.status = OperationStatus.INCOMPLETED
+        result.status = OperationStatus.COMPLETED #OPERATION IS COMPLETED INSTEAD IS PRINTER OR NOT
         result.error = f"Print document error: {str(e)}"
     return result
 
