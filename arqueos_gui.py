@@ -93,6 +93,7 @@ class ArqueosGUI:
         # Create tabs
         self.create_monitor_tab()
         self.create_history_tab()
+        self.create_logs_tab()
 
     def create_monitor_tab(self):
         """Create the Monitor tab with real-time status."""
@@ -132,6 +133,292 @@ class ArqueosGUI:
 
         # Export Panel
         self.create_export_panel(history_frame)
+
+    def create_logs_tab(self):
+        """Create the Logs tab with comprehensive log viewer."""
+        # Create frame for logs tab
+        logs_frame = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(logs_frame, text="📋 Logs")
+
+        # Configure grid
+        logs_frame.columnconfigure(0, weight=1)
+        logs_frame.rowconfigure(2, weight=1)  # Log display expands
+
+        # Control Panel
+        self.create_logs_control_panel(logs_frame)
+
+        # Statistics Panel
+        self.create_logs_stats_panel(logs_frame)
+
+        # Log Display
+        self.create_logs_display_panel(logs_frame)
+
+        # Initialize log filtering state
+        self.log_auto_scroll = True
+        self.log_level_filter = "All"
+        self.log_search_term = ""
+
+    def create_logs_control_panel(self, parent):
+        """Create log control panel with filters and actions."""
+        control_frame = ttk.LabelFrame(parent, text="🔧 Log Controls", padding="10")
+        control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+
+        # Row 1: Level filter and search
+        ttk.Label(control_frame, text="Level:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.log_level_combo = ttk.Combobox(
+            control_frame,
+            values=["All", "INFO", "WARNING", "ERROR", "DEBUG"],
+            state="readonly",
+            width=12
+        )
+        self.log_level_combo.set("All")
+        self.log_level_combo.grid(row=0, column=1, sticky=tk.W, padx=(0, 20))
+        self.log_level_combo.bind("<<ComboboxSelected>>", lambda e: self.filter_logs())
+
+        ttk.Label(control_frame, text="Search:").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        self.log_search_entry = ttk.Entry(control_frame, width=40)
+        self.log_search_entry.grid(row=0, column=3, sticky=(tk.W, tk.E), padx=(0, 10))
+        self.log_search_entry.bind("<KeyRelease>", lambda e: self.filter_logs())
+
+        # Search button
+        search_btn = ttk.Button(
+            control_frame,
+            text="🔍 Filter",
+            command=self.filter_logs,
+            width=10
+        )
+        search_btn.grid(row=0, column=4, padx=5)
+
+        # Row 2: Actions
+        self.log_autoscroll_var = tk.BooleanVar(value=True)
+        autoscroll_check = ttk.Checkbutton(
+            control_frame,
+            text="Auto-scroll",
+            variable=self.log_autoscroll_var
+        )
+        autoscroll_check.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+
+        clear_btn = ttk.Button(
+            control_frame,
+            text="🗑 Clear Logs",
+            command=self.clear_logs_display,
+            width=15
+        )
+        clear_btn.grid(row=1, column=2, padx=5, pady=(10, 0))
+
+        export_btn = ttk.Button(
+            control_frame,
+            text="📤 Export Logs",
+            command=self.export_logs,
+            width=15
+        )
+        export_btn.grid(row=1, column=3, padx=5, pady=(10, 0))
+
+        refresh_btn = ttk.Button(
+            control_frame,
+            text="🔄 Refresh",
+            command=self.refresh_logs,
+            width=15
+        )
+        refresh_btn.grid(row=1, column=4, padx=5, pady=(10, 0))
+
+        # Configure column weights
+        control_frame.columnconfigure(3, weight=1)
+
+    def create_logs_stats_panel(self, parent):
+        """Create log statistics panel."""
+        stats_frame = ttk.LabelFrame(parent, text="📊 Log Statistics", padding="10")
+        stats_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+
+        # Total logs
+        ttk.Label(stats_frame, text="Total:", font=("Segoe UI", 9)).grid(
+            row=0, column=0, sticky=tk.W, padx=(0, 5)
+        )
+        self.log_total_label = ttk.Label(
+            stats_frame,
+            text="0",
+            font=("Segoe UI", 10, "bold")
+        )
+        self.log_total_label.grid(row=0, column=1, sticky=tk.W, padx=(0, 20))
+
+        # INFO
+        ttk.Label(stats_frame, text="INFO:", font=("Segoe UI", 9)).grid(
+            row=0, column=2, sticky=tk.W, padx=(0, 5)
+        )
+        self.log_info_label = ttk.Label(
+            stats_frame,
+            text="0",
+            font=("Segoe UI", 10, "bold"),
+            foreground="black"
+        )
+        self.log_info_label.grid(row=0, column=3, sticky=tk.W, padx=(0, 20))
+
+        # WARNING
+        ttk.Label(stats_frame, text="WARNING:", font=("Segoe UI", 9)).grid(
+            row=0, column=4, sticky=tk.W, padx=(0, 5)
+        )
+        self.log_warning_label = ttk.Label(
+            stats_frame,
+            text="0",
+            font=("Segoe UI", 10, "bold"),
+            foreground="orange"
+        )
+        self.log_warning_label.grid(row=0, column=5, sticky=tk.W, padx=(0, 20))
+
+        # ERROR
+        ttk.Label(stats_frame, text="ERROR:", font=("Segoe UI", 9)).grid(
+            row=0, column=6, sticky=tk.W, padx=(0, 5)
+        )
+        self.log_error_label = ttk.Label(
+            stats_frame,
+            text="0",
+            font=("Segoe UI", 10, "bold"),
+            foreground="red"
+        )
+        self.log_error_label.grid(row=0, column=7, sticky=tk.W, padx=(0, 20))
+
+        # DEBUG
+        ttk.Label(stats_frame, text="DEBUG:", font=("Segoe UI", 9)).grid(
+            row=0, column=8, sticky=tk.W, padx=(0, 5)
+        )
+        self.log_debug_label = ttk.Label(
+            stats_frame,
+            text="0",
+            font=("Segoe UI", 10, "bold"),
+            foreground="gray"
+        )
+        self.log_debug_label.grid(row=0, column=9, sticky=tk.W)
+
+    def create_logs_display_panel(self, parent):
+        """Create the main log display area."""
+        log_frame = ttk.LabelFrame(parent, text="📝 Application Logs", padding="5")
+        log_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5))
+
+        # Configure grid
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+
+        # Log text widget with scrollbar
+        self.logs_text = scrolledtext.ScrolledText(
+            log_frame,
+            wrap=tk.WORD,
+            width=100,
+            height=25,
+            font=("Consolas", 9),
+            state=tk.DISABLED
+        )
+        self.logs_text.pack(fill=tk.BOTH, expand=True)
+
+        # Configure log text tags for colors
+        self.logs_text.tag_config("INFO", foreground="black")
+        self.logs_text.tag_config("WARNING", foreground="orange")
+        self.logs_text.tag_config("ERROR", foreground="red")
+        self.logs_text.tag_config("DEBUG", foreground="gray")
+
+    def filter_logs(self):
+        """Filter logs based on level and search term."""
+        self.log_level_filter = self.log_level_combo.get()
+        self.log_search_term = self.log_search_entry.get().strip().lower()
+        self.update_logs_display()
+
+    def clear_logs_display(self):
+        """Clear all logs from status manager."""
+        status_manager._data_lock.acquire()
+        try:
+            status_manager.log_messages.clear()
+            status_manager.add_log("Logs cleared by user", "INFO")
+        finally:
+            status_manager._data_lock.release()
+        self.update_logs_display()
+
+    def refresh_logs(self):
+        """Manually refresh the log display."""
+        self.update_logs_display()
+
+    def export_logs(self):
+        """Export logs to a text file."""
+        try:
+            filepath = filedialog.asksaveasfilename(
+                title="Export Logs",
+                defaultextension=".txt",
+                filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            )
+
+            if not filepath:
+                return  # User cancelled
+
+            # Get all logs from status manager
+            all_logs = status_manager.get_logs(200)
+
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write("=" * 80 + "\n")
+                f.write("SICAL ARQUEOS ROBOT - APPLICATION LOGS\n")
+                f.write(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("=" * 80 + "\n\n")
+
+                for log in all_logs:
+                    f.write(log + "\n")
+
+            messagebox.showinfo("Success", f"Logs exported successfully to:\n{filepath}")
+            status_manager.add_log(f"Logs exported to {filepath}", "INFO")
+
+        except Exception as e:
+            status_manager.add_log(f"Failed to export logs: {e}", "ERROR")
+            messagebox.showerror("Error", f"Failed to export logs:\n{e}")
+
+    def update_logs_display(self):
+        """Update the logs display with filtering."""
+        # Get all logs (200 instead of 50)
+        all_logs = status_manager.get_logs(200)
+
+        # Apply filters
+        filtered_logs = []
+        for log in all_logs:
+            # Level filter
+            if self.log_level_filter != "All":
+                if f"[{self.log_level_filter}]" not in log:
+                    continue
+
+            # Search filter
+            if self.log_search_term:
+                if self.log_search_term not in log.lower():
+                    continue
+
+            filtered_logs.append(log)
+
+        # Update display
+        self.logs_text.config(state=tk.NORMAL)
+        self.logs_text.delete("1.0", tk.END)
+
+        for log in filtered_logs:
+            # Determine tag based on log level
+            tag = "INFO"
+            if "[ERROR]" in log:
+                tag = "ERROR"
+            elif "[WARNING]" in log:
+                tag = "WARNING"
+            elif "[DEBUG]" in log:
+                tag = "DEBUG"
+
+            self.logs_text.insert(tk.END, log + "\n", tag)
+
+        # Auto-scroll to bottom if enabled
+        if self.log_autoscroll_var.get():
+            self.logs_text.see(tk.END)
+
+        self.logs_text.config(state=tk.DISABLED)
+
+        # Update statistics
+        info_count = sum(1 for log in all_logs if "[INFO]" in log)
+        warning_count = sum(1 for log in all_logs if "[WARNING]" in log)
+        error_count = sum(1 for log in all_logs if "[ERROR]" in log)
+        debug_count = sum(1 for log in all_logs if "[DEBUG]" in log)
+
+        self.log_total_label.config(text=str(len(all_logs)))
+        self.log_info_label.config(text=str(info_count))
+        self.log_warning_label.config(text=str(warning_count))
+        self.log_error_label.config(text=str(error_count))
+        self.log_debug_label.config(text=str(debug_count))
 
     def create_history_search_panel(self, parent):
         """Create search and filter controls for history."""
@@ -841,6 +1128,10 @@ class ArqueosGUI:
                 # Auto-scroll to bottom
                 self.log_text.see(tk.END)
                 self.log_text.config(state=tk.DISABLED)
+
+        # Update logs tab if it exists
+        if hasattr(self, 'logs_text'):
+            self.update_logs_display()
 
         # Schedule next update (500ms)
         self.root.after(500, self.update_display)
