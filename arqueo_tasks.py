@@ -813,6 +813,7 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
                         )
 
                 elif (naturaleza_operacion == '5'):
+                    
                     ventana_arqueo.send_keys(
                         keys=aplicacion["partida"],
                         interval=0.01,
@@ -860,6 +861,40 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
                     suma_aplicaciones = suma_aplicaciones + float(
                         aplicacion["importe"].replace(",", ".")
                     )
+
+                elif (naturaleza_operacion == '2'):
+                    ventana_arqueo.send_keys(
+                        keys=aplicacion["year"],
+                        interval=0.01,
+                        wait_time=default_wait_time,
+                        send_enter=False,
+                    )
+
+                    ventana_arqueo.send_keys(
+                        keys=aplicacion["partida"],
+                        interval=0.01,
+                        wait_time=default_wait_time,
+                        send_enter=False,
+                    )
+
+                    if not aplicacion.get("contraido", False):
+                    # Code runs if "contraido" doesn't exist or has any falsy value:
+                        time.sleep(0.2)
+                        ventana_arqueo.send_keys(
+                            keys="{Tab}{Tab}{Tab}", wait_time=default_wait_time, interval=0.1
+                        )
+                        ventana_arqueo.send_keys(
+                            keys=aplicacion["importe"],
+                            interval=0.1,
+                            wait_time=default_wait_time,
+                            send_enter=False,
+                        )
+                        #LA NATURALEZA 2 NO ACEPTA el campo cuenta
+                        
+                        check_button_element = ventana_arqueo.find('path:"3|2|4"').click()
+                        suma_aplicaciones = suma_aplicaciones + float(
+                            aplicacion["importe"].replace(",", ".")
+                        )
 
                 else: 
                     arqueo_logger.info(f"otra NATURALEZA ?? ... {naturaleza_operacion} ")   
@@ -918,15 +953,15 @@ def print_operation_document(ventana_arqueo, result: OperationResult) -> Operati
 
         #imprimir y guardar como pdf
         ventana_visualizador_documentos = windows.find_window('regex:.*Visualizador de Documentos de SICAL v2')
-        boton_imprimir_click = ventana_visualizador_documentos.find('class:"TBitBtn" and path:"2|2|6"').click()
+        boton_imprimir_click = ventana_visualizador_documentos.find('class:"TBitBtn" and path:"2|2|7"').click()
         time.sleep(0.1)
-        boton_salir_click = ventana_visualizador_documentos.find('class:"TBitBtn" and path:"2|2|5"').click()
+        boton_salir_click = ventana_visualizador_documentos.find('class:"TBitBtn" and path:"2|2|6"').click()
         #boton_guardar_pdf = ventana_visualizador_documentos.find('class:"TBitBtn" and path:"2|2|2"').click()
         result.status = OperationStatus.COMPLETED
         return result
     
     except Exception as e:
-        result.status = OperationStatus.COMPLETED #OPERATION IS COMPLETED INSTEAD IS PRINTER OR NOT
+        result.status = OperationStatus.COMPLETED #OPERATION IS COMPLETED although doc iS PRINTER OR NOT
         result.error = f"Print document error: {str(e)}"
     return result
 
