@@ -867,7 +867,7 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
                         keys=aplicacion["year"],
                         interval=0.01,
                         wait_time=default_wait_time,
-                        send_enter=False,
+                        send_enter=True,
                     )
 
                     ventana_arqueo.send_keys(
@@ -876,6 +876,17 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
                         wait_time=default_wait_time,
                         send_enter=False,
                     )
+
+                    if aplicacion.get("proyecto", False):
+                        ventana_arqueo.send_keys(
+                            keys="{Tab}", wait_time=0.02, interval=0.02
+                        )
+                        ventana_arqueo.send_keys(
+                            keys=aplicacion["proyecto"],
+                            interval=0.01,
+                            wait_time=default_wait_time,
+                            send_enter=True,
+                        )
 
                     if not aplicacion.get("contraido", False):
                     # Code runs if "contraido" doesn't exist or has any falsy value:
