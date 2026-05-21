@@ -64,9 +64,18 @@ class TaskHistoryDB:
                     duration_seconds REAL,
                     error_message TEXT,
                     raw_data TEXT,
+                    attachment_info TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Additive migration for databases created before the
+            # attachment-finalization feature.
+            existing = {row[1] for row in
+                        conn.execute("PRAGMA table_info(task_history)")}
+            if 'attachment_info' not in existing:
+                conn.execute(
+                    "ALTER TABLE task_history ADD COLUMN attachment_info TEXT")
 
             # Create indexes for common queries
             conn.execute("""
@@ -101,8 +110,8 @@ class TaskHistoryDB:
                         task_id, operation_number, amount, date, cash_register,
                         third_party, nature, description, total_line_items,
                         status, started_at, completed_at, duration_seconds,
-                        error_message, raw_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        error_message, raw_data, attachment_info
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     task_data.get('task_id'),
                     task_data.get('operation_number'),
@@ -118,7 +127,8 @@ class TaskHistoryDB:
                     task_data.get('completed_at'),
                     task_data.get('duration_seconds'),
                     task_data.get('error_message'),
-                    json.dumps(task_data.get('raw_data', {}))
+                    json.dumps(task_data.get('raw_data', {})),
+                    task_data.get('attachment_info')
                 ))
             return True
         except Exception as e:
@@ -128,7 +138,8 @@ class TaskHistoryDB:
     def update_task_status(self, task_id: str, status: str,
                           completed_at: Optional[datetime] = None,
                           duration_seconds: Optional[float] = None,
-                          error_message: Optional[str] = None) -> bool:
+                          error_message: Optional[str] = None,
+                          attachment_info: Optional[str] = None) -> bool:
         """
         Update task status and completion info
 
@@ -144,14 +155,27 @@ class TaskHistoryDB:
         """
         try:
             with self._get_connection() as conn:
-                conn.execute("""
-                    UPDATE task_history
-                    SET status = ?,
-                        completed_at = ?,
-                        duration_seconds = ?,
-                        error_message = ?
-                    WHERE task_id = ?
-                """, (status, completed_at, duration_seconds, error_message, task_id))
+                if attachment_info is not None:
+                    conn.execute("""
+                        UPDATE task_history
+                        SET status = ?,
+                            completed_at = ?,
+                            duration_seconds = ?,
+                            error_message = ?,
+                            attachment_info = ?
+                        WHERE task_id = ?
+                    """, (status, completed_at, duration_seconds,
+                          error_message, attachment_info, task_id))
+                else:
+                    conn.execute("""
+                        UPDATE task_history
+                        SET status = ?,
+                            completed_at = ?,
+                            duration_seconds = ?,
+                            error_message = ?
+                        WHERE task_id = ?
+                    """, (status, completed_at, duration_seconds,
+                          error_message, task_id))
             return True
         except Exception as e:
             logger.error(f"Failed to update task {task_id}: {e}")

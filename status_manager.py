@@ -5,6 +5,7 @@ This module provides a singleton StatusManager that maintains the current state
 of the service, including task statistics, current execution status, and connection state.
 """
 
+import json
 import threading
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -32,6 +33,9 @@ class TaskInfo:
     total_line_items: int = 0  # Total number of aplicaciones
     current_line_item: int = 0  # Current line item being processed
     line_item_details: Optional[str] = None  # Current line item description
+    # Contable-capture summary (None until/unless the capture path ran).
+    # Shape: {filename, size_bytes, page_count, sha256, status, error}
+    capture: Optional[Dict[str, Any]] = None
 
     def duration(self) -> float:
         """Returns the duration in seconds since task started."""
@@ -44,6 +48,25 @@ class TaskInfo:
         elif self.nature == '5':
             return "📋 Non-presupuestary"
         return "Unknown"
+
+    def capture_display(self) -> str:
+        """One-line contable-capture summary for the current-task panel."""
+        cap = self.capture
+        if not cap:
+            return "— N/A"
+        name = cap.get('filename') or "contable.pdf"
+        status = cap.get('status')
+        icon = {'CAPTURED': '✅', 'FAILED': '⚠️'}.get(status, '📄')
+        size = cap.get('size_bytes')
+        pages = cap.get('page_count')
+        meta = []
+        if pages is not None:
+            meta.append(f"{pages}p")
+        if size is not None:
+            meta.append(f"{size}B")
+        suffix = f" [{status}]" if status else ""
+        meta_str = f" ({', '.join(meta)})" if meta else ""
+        return f"{icon} {name}{meta_str}{suffix}"
 
 
 class StatusManager:
@@ -139,7 +162,8 @@ class StatusManager:
                 third_party=kwargs.get('third_party'),
                 nature=kwargs.get('nature'),
                 description=kwargs.get('description'),
-                total_line_items=kwargs.get('total_line_items', 0)
+                total_line_items=kwargs.get('total_line_items', 0),
+                capture=None  # set on completion (capture runs during processing)
             )
 
             stored_info = f"Date: {self.current_task.date}, Cash: {self.current_task.cash_register}, " \
@@ -167,7 +191,9 @@ class StatusManager:
                 'completed_at': None,
                 'duration_seconds': None,
                 'error_message': None,
-                'raw_data': kwargs
+                'raw_data': kwargs,
+                # Capture info is unknown at start; set on completion.
+                'attachment_info': None
             }
             db.save_task(task_data)
         except Exception as e:
@@ -185,10 +211,15 @@ class StatusManager:
                 if 'line_item_details' in kwargs:
                     self.current_task.line_item_details = kwargs['line_item_details']
 
-    def task_completed(self, task_id: str, success: bool = True, error_message: Optional[str] = None):
+    def task_completed(self, task_id: str, success: bool = True,
+                       error_message: Optional[str] = None,
+                       capture_info: Optional[Dict[str, Any]] = None):
         """Called when a task completes (success or failure)."""
         completed_at = datetime.now()
         duration_seconds = None
+        # Persisted in the (internal) attachment_info column, repurposed to
+        # hold the contable-capture summary JSON.
+        capture_json = json.dumps(capture_info) if capture_info else None
 
         with self._data_lock:
             if self.stats['processing'] > 0:
@@ -201,9 +232,11 @@ class StatusManager:
 
             self.stats['total_processed'] += 1
 
-            # Calculate duration if we have the current task
+            # Calculate duration / attach the contable-capture summary
             if self.current_task and self.current_task.task_id == task_id:
                 duration_seconds = self.current_task.duration()
+                if capture_info is not None:
+                    self.current_task.capture = capture_info
                 self.current_task = None
 
         # Update database
@@ -215,7 +248,8 @@ class StatusManager:
                 status=status,
                 completed_at=completed_at,
                 duration_seconds=duration_seconds,
-                error_message=error_message
+                error_message=error_message,
+                attachment_info=capture_json
             )
         except Exception as e:
             self.add_log(f"Failed to update task in database: {e}", "ERROR")
@@ -261,7 +295,9 @@ class StatusManager:
                     'description': self.current_task.description,
                     'total_line_items': self.current_task.total_line_items,
                     'current_line_item': self.current_task.current_line_item,
-                    'line_item_details': self.current_task.line_item_details
+                    'line_item_details': self.current_task.line_item_details,
+                    'capture': self.current_task.capture,
+                    'capture_display': self.current_task.capture_display()
                 }
 
             # Calculate session uptime

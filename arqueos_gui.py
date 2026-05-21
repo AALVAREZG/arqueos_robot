@@ -7,6 +7,7 @@ Provides real-time status updates, task monitoring, and service control.
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, filedialog, messagebox
+import json
 import threading
 import logging
 from datetime import datetime
@@ -55,16 +56,11 @@ class ArqueosGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def setup_logging(self):
-        """Setup logging to capture all logs for display."""
-        # Get root logger
-        root_logger = logging.getLogger()
-
-        # Add our custom handler
-        gui_handler = LogHandler()
-        gui_handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(name)s - %(message)s')
-        gui_handler.setFormatter(formatter)
-        root_logger.addHandler(gui_handler)
+        """Route the GUI Activity Log through the centralized, phase-oriented
+        logging. The GUI shows only the clean INFO phase stream (no DEBUG
+        internals nor third-party noise); console behaviour is unchanged."""
+        from logging_setup import configure_logging
+        configure_logging(gui_handler=LogHandler())
 
     def create_widgets(self):
         """Create all GUI widgets."""
@@ -525,7 +521,8 @@ class ArqueosGUI:
         self.history_tree = ttk.Treeview(
             table_frame,
             columns=("task_id", "date", "operation", "amount", "cash_register",
-                    "third_party", "nature", "status", "duration", "completed_at"),
+                    "third_party", "nature", "status", "doc", "duration",
+                    "completed_at"),
             show="headings",
             yscrollcommand=tree_scroll_y.set,
             xscrollcommand=tree_scroll_x.set,
@@ -544,6 +541,7 @@ class ArqueosGUI:
         self.history_tree.heading("third_party", text="Third Party")
         self.history_tree.heading("nature", text="Nature")
         self.history_tree.heading("status", text="Status")
+        self.history_tree.heading("doc", text="Doc")
         self.history_tree.heading("duration", text="Duration")
         self.history_tree.heading("completed_at", text="Completed At")
 
@@ -556,6 +554,7 @@ class ArqueosGUI:
         self.history_tree.column("third_party", width=150, minwidth=100)
         self.history_tree.column("nature", width=100, minwidth=80)
         self.history_tree.column("status", width=90, minwidth=70)
+        self.history_tree.column("doc", width=50, minwidth=40, anchor=tk.CENTER)
         self.history_tree.column("duration", width=80, minwidth=60)
         self.history_tree.column("completed_at", width=150, minwidth=120)
 
@@ -798,12 +797,19 @@ class ArqueosGUI:
         self.line_item_details_label = ttk.Label(task_frame, text="--", wraplength=600)
         self.line_item_details_label.grid(row=8, column=1, sticky=tk.W, columnspan=3, padx=5)
 
-        # Row 9: Current step
-        ttk.Label(task_frame, text="Status:", font=("Segoe UI", 9)).grid(
+        # Row 9: Contable document capture (status / size / pages)
+        ttk.Label(task_frame, text="Contable:", font=("Segoe UI", 9, "bold")).grid(
             row=9, column=0, sticky=tk.W
         )
+        self.capture_label = ttk.Label(task_frame, text="--", wraplength=600)
+        self.capture_label.grid(row=9, column=1, sticky=tk.W, columnspan=3, padx=5)
+
+        # Row 10: Current step
+        ttk.Label(task_frame, text="Status:", font=("Segoe UI", 9)).grid(
+            row=10, column=0, sticky=tk.W
+        )
         self.step_label = ttk.Label(task_frame, text="--", wraplength=600, foreground="blue")
-        self.step_label.grid(row=9, column=1, sticky=tk.W, columnspan=3, padx=5)
+        self.step_label.grid(row=10, column=1, sticky=tk.W, columnspan=3, padx=5)
 
     def create_control_panel(self, parent):
         """Create the control buttons panel."""
@@ -950,24 +956,21 @@ class ArqueosGUI:
             operation_number = kwargs.get('operation_number')
             amount = kwargs.get('amount')
 
-            # DEBUG: Log what we received
-            status_manager.add_log(f"GUI received task_started with keys: {list(kwargs.keys())}", "DEBUG")
-            status_manager.add_log(f"Date: {kwargs.get('date')}, Cash: {kwargs.get('cash_register')}, "
-                                  f"Third Party: {kwargs.get('third_party')}, Nature: {kwargs.get('nature')}", "DEBUG")
-
             # Pass all additional kwargs (date, cash_register, third_party, nature, etc.)
             # Remove the keys we've already extracted to avoid duplicate arguments
             additional_kwargs = {k: v for k, v in kwargs.items()
                                if k not in ('task_id', 'operation_number', 'amount')}
-
-            status_manager.add_log(f"Passing additional_kwargs keys: {list(additional_kwargs.keys())}", "DEBUG")
             status_manager.task_started(task_id, operation_number, amount, **additional_kwargs)
         elif event == 'task_completed':
             task_id = kwargs.get('task_id', 'unknown')
-            status_manager.task_completed(task_id, success=True)
+            status_manager.task_completed(
+                task_id, success=True,
+                capture_info=kwargs.get('capture_info'))
         elif event == 'task_failed':
             task_id = kwargs.get('task_id', 'unknown')
-            status_manager.task_completed(task_id, success=False)
+            status_manager.task_completed(
+                task_id, success=False,
+                capture_info=kwargs.get('capture_info'))
 
     def task_callback(self, event: str, **kwargs):
         """
@@ -987,16 +990,7 @@ class ArqueosGUI:
         # Get current status
         status = status_manager.get_status()
 
-        # DEBUG: Log what get_status returned for current_task (only once per task)
         current_task = status.get('current_task')
-        if current_task and not hasattr(self, '_last_logged_task_id'):
-            self._last_logged_task_id = current_task.get('task_id')
-            status_manager.add_log(f"GUI update_display sees task: Date={current_task.get('date')}, "
-                                  f"Cash={current_task.get('cash_register')}, "
-                                  f"Nature={current_task.get('nature')}", "DEBUG")
-        elif not current_task:
-            if hasattr(self, '_last_logged_task_id'):
-                del self._last_logged_task_id
 
         # Update service status
         if status['service_running']:
@@ -1084,6 +1078,9 @@ class ArqueosGUI:
 
             step = current_task['current_step'] or "Processing..."
             self.step_label.config(text=step)
+
+            capture_text = current_task.get('capture_display') or "— N/A"
+            self.capture_label.config(text=capture_text)
         else:
             self.current_task_label.config(
                 text="No task currently processing",
@@ -1100,6 +1097,7 @@ class ArqueosGUI:
             self.line_items_label.config(text="--")
             self.line_item_details_label.config(text="--")
             self.step_label.config(text="--")
+            self.capture_label.config(text="--")
 
         # Update logs
         recent_logs = status['recent_logs']
@@ -1188,6 +1186,17 @@ class ArqueosGUI:
 
                 status = (task.get('status', '--') or '--').capitalize()
 
+                # Contable-capture indicator
+                att_raw = task.get('attachment_info')
+                doc_cell = "—"
+                if att_raw:
+                    try:
+                        ai = json.loads(att_raw)
+                        doc_cell = {'CAPTURED': '✅', 'FAILED': '⚠️'}.get(
+                            ai.get('status'), '📄')
+                    except Exception:
+                        doc_cell = '📄'
+
                 # Duration
                 duration_sec = task.get('duration_seconds')
                 if duration_sec:
@@ -1214,7 +1223,8 @@ class ArqueosGUI:
                     "",
                     0,  # Insert at beginning (most recent first)
                     values=(task_id, date, operation, amount, cash_reg,
-                           third_party, nature_display, status, duration, completed_at),
+                           third_party, nature_display, status, doc_cell,
+                           duration, completed_at),
                     tags=(tag,)
                 )
 
@@ -1311,6 +1321,29 @@ Completed At:     {task.get('completed_at', '--')}
 Duration:         {duration_str}
 
 """
+            # Add contable-capture section if the capture path ran
+            att_raw = task.get('attachment_info')
+            if att_raw:
+                try:
+                    ai = json.loads(att_raw)
+                except Exception:
+                    ai = {}
+                size = ai.get('size_bytes')
+                size_str = f"{size:,} bytes" if isinstance(size, int) else '--'
+                details += f"""╔═══════════════════════════════════════════════════════════════╗
+║                    CONTABLE DOCUMENT                          ║
+╚═══════════════════════════════════════════════════════════════╝
+
+Document Name:    {ai.get('filename', '--') or '--'}
+Pages:            {ai.get('page_count', '--')}
+Size:             {size_str}
+SHA-256:          {ai.get('sha256', '--') or '--'}
+Capture Result:   {ai.get('status') or '--'}
+"""
+                if ai.get('error'):
+                    details += f"Capture Error:    {ai.get('error')}\n"
+                details += "\n"
+
             # Add error message if present
             if task.get('error_message'):
                 details += f"""╔═══════════════════════════════════════════════════════════════╗

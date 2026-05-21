@@ -3,13 +3,37 @@
 import pika
 import json
 import dataclasses
-import logging
 import comtypes
 from typing import Optional, Callable
 from config import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
 from arqueo_tasks import OperationEncoder, operacion_arqueo
+from logging_setup import (
+    configure_logging, get_logger, bind_task, unbind_task,
+    phase as log_phase, ok as log_ok, warn as log_warn,
+    fail as log_fail, detail as log_detail,
+)
 
-logger = logging.getLogger(__name__)
+configure_logging()  # idempotent
+logger = get_logger(__name__)
+
+
+def _capture_info(envelope: Optional[dict]) -> Optional[dict]:
+    """
+    Compact contable-capture summary for the GUI/history (spec v2).
+    None when the task didn't run the capture path (flag OFF / not
+    finalized). The base64 `data` is deliberately excluded.
+    """
+    if not envelope:
+        return None
+    return {
+        'filename': envelope.get('filename'),
+        'size_bytes': envelope.get('size_bytes'),
+        'page_count': envelope.get('page_count'),
+        'sha256': envelope.get('sha256'),
+        'status': envelope.get('capture_status'),  # CAPTURED | FAILED
+        'error': envelope.get('capture_error'),
+    }
+
 
 # Optional status callback for GUI integration
 STATUS_CALLBACK: Optional[Callable] = None
@@ -61,13 +85,13 @@ class ArqueoConsumer:
 
             # Set QoS to handle one message at a time
             self.channel.basic_qos(prefetch_count=1)
-            logger.info("RabbitMQ connection established successfully")
+            log_ok(logger, 'CONN', 'RabbitMQ connected')
 
             if STATUS_CALLBACK:
                 STATUS_CALLBACK('connected')
 
         except Exception as e:
-            logger.error(f"Failed to connect to RabbitMQ: {e}")
+            log_fail(logger, 'CONN', f'RabbitMQ connect failed: {e}')
             if STATUS_CALLBACK:
                 STATUS_CALLBACK('disconnected')
             raise
@@ -77,45 +101,26 @@ class ArqueoConsumer:
         Process incoming messages from RabbitMQ.
         This is called automatically by pika for each message received.
         """
-        logger.info(f"Received message with correlation_id: {properties.correlation_id}")
-
         task_id = None
         try:
             # Parse the incoming message
             data = json.loads(body)
-            logger.info(f"Message content: {data}")
-
-            # DEBUG: Log to GUI
-            if STATUS_CALLBACK:
-                # Import here to avoid circular dependency
-                from status_manager import status_manager
-                status_manager.add_log(f"Received message with task_id: {data.get('task_id', 'unknown')}", "DEBUG")
-
-                # DEBUG: Log the TOP-LEVEL keys in the message
-                status_manager.add_log(f"CONSUMER: TOP-LEVEL message keys: {list(data.keys())}", "DEBUG")
-
-                # DEBUG: Log the operation_data structure
-                if 'operation_data' in data:
-                    operation_data = data.get('operation_data', {})
-                    status_manager.add_log(f"CONSUMER: operation_data keys: {list(operation_data.keys())}", "DEBUG")
-
             task_id = data.get('task_id', 'unknown')
+            bind_task(task_id)
+            log_phase(logger, 'RECEIVED',
+                      f"arqueo task {task_id} (corr={properties.correlation_id})")
+            log_detail(logger, 'RECEIVED', f"payload={data}")
 
             # Notify GUI: task received
             if STATUS_CALLBACK:
                 STATUS_CALLBACK('task_received', task_id=task_id)
 
-            # Extract operation details for GUI (with safe access)
+            # Extract operation details (the real data is inside 'detalle')
             operation = data.get('operation_data', {}).get('operation', {})
-
-            # The actual operation data is inside 'detalle'
             detalle = operation.get('detalle', {})
-
-            # DEBUG: Log what we found
-            if STATUS_CALLBACK:
-                from status_manager import status_manager
-                status_manager.add_log(f"CONSUMER: operation dict keys: {list(operation.keys())}", "DEBUG")
-                status_manager.add_log(f"CONSUMER: detalle keys: {list(detalle.keys())}", "DEBUG")
+            log_detail(logger, 'PARSED',
+                       f"operation keys={list(operation.keys())} "
+                       f"detalle keys={list(detalle.keys())}")
 
             # Extract from detalle where the actual data is
             operation_number = detalle.get('num_operacion')
@@ -137,15 +142,14 @@ class ArqueoConsumer:
             aplicaciones = detalle.get('aplicaciones', [])
             total_line_items = len(aplicaciones) if aplicaciones else 0
 
-            logger.info(f"Extracted task details - Operation: {operation_number}, Amount: {total_amount}, "
-                       f"Date: {fecha}, Nature: {naturaleza}, Line items: {total_line_items}")
+            log_phase(logger, 'PARSED',
+                      f"op#{operation_number or '-'} importe={total_amount} "
+                      f"fecha={fecha} caja={caja} tercero={tercero} "
+                      f"nat={naturaleza} lineas={total_line_items}")
 
-            # DEBUG: Log extracted details to GUI
-            if STATUS_CALLBACK:
-                from status_manager import status_manager
-                status_manager.add_log(f"CONSUMER extracted - Operation: {operation_number}, Amount: {total_amount}, "
-                                      f"Date: {fecha}, Cash: {caja}, Third Party: {tercero}, "
-                                      f"Nature: {naturaleza}, Line items: {total_line_items}", "DEBUG")
+            # Spec v2: the consumer no longer receives attachments. It runs
+            # the SICAL op and (behind the rollout flag) captures the
+            # contable PDF, returned to sical-robot in the result message.
 
             # Notify GUI: task started with full details
             if STATUS_CALLBACK:
@@ -160,16 +164,38 @@ class ArqueoConsumer:
                               description=resumen,
                               total_line_items=total_line_items)
 
-            # Process the arqueo operation
-            result = operacion_arqueo(data['operation_data']['operation'])
+            # Process the arqueo operation.
+            result = operacion_arqueo(
+                data['operation_data']['operation'],
+                task_id,
+            )
 
-            logger.info(f"RESULTADO OPERACIÓN ARQUEO.......: {result}")
+            log_detail(logger, 'RESULT', f"OperationResult={result}")
             # Prepare response
             response = {
                 'status': result.status.value,
                 'operation_id': task_id,
                 'result': dataclasses.asdict(result)
             }
+
+            # Spec v2 §2.2: return the captured contable PDF envelope
+            # (base64 + metadata) so sical-robot can merge/print/stage.
+            # Only present when the capture path ran (flag ON + finalized).
+            contable = getattr(result, '_contable_document', None)
+            if contable:
+                response['contable_document'] = contable
+                cs = contable.get('capture_status')
+                if cs == 'CAPTURED':
+                    log_phase(logger, 'RESULT',
+                              f"returning contable {contable.get('page_count')}p / "
+                              f"{contable.get('size_bytes')} B to producer")
+                else:
+                    log_fail(logger, 'RESULT',
+                             f"contable not returned: "
+                             f"{contable.get('capture_error') or cs}")
+            else:
+                log_detail(logger, 'RESULT',
+                           'no contable (capture flag OFF or not finalized)')
 
             # Send response back through RabbitMQ to sical_results queue
             ch.basic_publish(
@@ -184,26 +210,33 @@ class ArqueoConsumer:
 
             # Acknowledge the message was processed successfully
             ch.basic_ack(delivery_tag=method.delivery_tag)
-            logger.info(f"Successfully processed message {properties.correlation_id}")
 
             # Notify GUI: check result status to determine if completed or failed
+            from arqueo_tasks import OperationStatus
+            succeeded = result.status in (OperationStatus.COMPLETED,
+                                          OperationStatus.INCOMPLETED)
+            if succeeded:
+                log_ok(logger, 'DONE',
+                       f"{result.status.value} (op#{result.num_operacion or '-'}, "
+                       f"{result.duration or '?'})")
+            else:
+                log_fail(logger, 'FAILED',
+                         f"{result.status.value}: {result.error or 'unknown'}")
             if STATUS_CALLBACK:
-                # Check if the operation actually succeeded
-                from arqueo_tasks import OperationStatus
-                if result.status in (OperationStatus.COMPLETED, OperationStatus.INCOMPLETED):
-                    STATUS_CALLBACK('task_completed', task_id=task_id)
-                else:
-                    # Operation failed (FAILED or PENDING status means something went wrong)
-                    STATUS_CALLBACK('task_failed', task_id=task_id)
+                capture_info = _capture_info(getattr(result, '_contable_document', None))
+                STATUS_CALLBACK('task_completed' if succeeded else 'task_failed',
+                                task_id=task_id, capture_info=capture_info)
 
         except Exception as e:
-            logger.exception(f"Error processing message: {e}")
+            log_fail(logger, 'CONSUMER', f"error processing message: {e}", exc=True)
             # Negative acknowledgment - message will be requeued
             ch.basic_nack(delivery_tag=method.delivery_tag)
 
             # Notify GUI: task failed
             if STATUS_CALLBACK and task_id:
                 STATUS_CALLBACK('task_failed', task_id=task_id)
+        finally:
+            unbind_task()
 
     def start_consuming(self):
         """Start consuming messages from the queue"""
@@ -212,12 +245,12 @@ class ArqueoConsumer:
         # and avoids COM state issues between successive tasks
         try:
             comtypes.CoInitialize()
-            logger.info("COM initialized for consumer thread")
+            log_detail(logger, 'CONN', 'COM initialized for consumer thread')
         except Exception as e:
-            logger.warning(f"COM initialization warning (may already be initialized): {e}")
+            log_detail(logger, 'CONN', f'COM init warning (may already be init): {e}')
 
         try:
-            logger.info(f"Starting to consume messages from {self.queue_name}")
+            log_phase(logger, 'CONN', f'consuming from {self.queue_name} - waiting for tasks')
 
             # Register the callback function to be called when messages arrive
             self.channel.basic_consume(
@@ -229,19 +262,19 @@ class ArqueoConsumer:
             self.channel.start_consuming()
 
         except KeyboardInterrupt:
-            logger.info("Received interrupt signal, shutting down...")
+            log_phase(logger, 'CONN', 'interrupt received - shutting down')
             self.stop_consuming()
         except Exception as e:
-            logger.error(f"Error while consuming messages: {e}")
+            log_fail(logger, 'CONN', f'consume error: {e}', exc=True)
             self.stop_consuming()
             raise
         finally:
             # Uninitialize COM when consumer thread exits
             try:
                 comtypes.CoUninitialize()
-                logger.info("COM uninitialized for consumer thread")
+                log_detail(logger, 'CONN', 'COM uninitialized for consumer thread')
             except Exception as e:
-                logger.warning(f"Error uninitializing COM: {e}")
+                log_detail(logger, 'CONN', f'COM uninit error: {e}')
 
     def stop_consuming(self):
         """Stop consuming messages and close connections"""
@@ -250,13 +283,13 @@ class ArqueoConsumer:
                 self.channel.stop_consuming()
             if self.connection and not self.connection.is_closed:
                 self.connection.close()
-            logger.info("Successfully shut down consumer")
+            log_phase(logger, 'CONN', 'consumer shut down')
 
             if STATUS_CALLBACK:
                 STATUS_CALLBACK('disconnected')
 
         except Exception as e:
-            logger.error(f"Error while shutting down: {e}")
+            log_fail(logger, 'CONN', f'shutdown error: {e}')
 
     def start(self):
         """Convenience method to start the consumer (alias for start_consuming)"""

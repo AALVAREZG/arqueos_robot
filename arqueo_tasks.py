@@ -135,14 +135,14 @@ COMMON_DIALOG_PATHS = {
 }
 
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# Centralized phase-oriented logging (see logging_setup.py).
+from logging_setup import (
+    get_logger, configure_logging, phase as log_phase, ok as log_ok,
+    warn as log_warn, fail as log_fail, detail as log_detail,
 )
 
-# Get logger instance
-arqueo_logger = logging.getLogger(__name__)
+configure_logging()  # idempotent; entrypoints may also call it
+arqueo_logger = get_logger(__name__)
 
 # Finalization flag constant
 FINALIZE_SUFFIX = '_FIN'
@@ -190,7 +190,9 @@ class OperationEncoder(json.JSONEncoder):
                 'total_operacion': obj.total_operacion,
                 'suma_aplicaciones': obj.suma_aplicaciones,
                 'sical_is_open': obj.sical_is_open,
-                'similiar_records_encountered': obj.similiar_records_encountered
+                'similiar_records_encountered': obj.similiar_records_encountered,
+                'capture_status': obj.capture_status,
+                'capture_error': obj.capture_error
             }
         return super().default(obj)
 
@@ -206,6 +208,11 @@ class OperationResult:
     suma_aplicaciones: Optional[float] = None
     sical_is_open: bool = False
     similiar_records_encountered: int = 0
+    # Attachment-finalization ack (None when the task carried no attachment).
+    # Contable-document capture ack (spec v2). The captured PDF itself is
+    # carried out-of-band on the result message, not in this dataclass.
+    capture_status: Optional[str] = None  # 'CAPTURED' | 'FAILED'
+    capture_error: Optional[str] = None
 
 class SicalWindowManager:
     def __init__(self):
@@ -235,7 +242,7 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
     Returns:
         Updated operation result with duplicate check status
     """
-    arqueo_logger.info('Checking for duplicate operations')
+    log_phase(arqueo_logger, 'DUP-CHECK', 'checking for similar operations')
     if TASK_CALLBACK:
         TASK_CALLBACK('step', step='Checking for duplicate operations')
 
@@ -347,7 +354,7 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
             num_registros_element = filtros_window.find(FILTROS_FORM_PATHS['num_registros'], raise_error=False)
             if num_registros_element:
                 num_registros = num_registros_element.get_value()
-                arqueo_logger.warning(f'Found {num_registros} similar records - possible duplicate')
+                log_warn(arqueo_logger, 'DUP-CHECK', f'{num_registros} similar record(s) found - possible duplicate')
                 result.similiar_records_encountered = int(num_registros) if num_registros else 0
             else:
                 result.similiar_records_encountered = 1  # At least one found
@@ -367,12 +374,12 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
             except:
                 pass
 
-            arqueo_logger.warning(f'Duplicate check failed: {result.error}')
+            log_warn(arqueo_logger, 'DUP-CHECK', f'aborting (possible duplicate): {result.error}')
 
         else:
             # No records found - safe to proceed
             result.similiar_records_encountered = 0
-            arqueo_logger.info('No similar records found - proceeding with operation')
+            log_ok(arqueo_logger, 'DUP-CHECK', 'no similar records - proceeding')
 
             # Close error dialog
             filtros_window.find(COMMON_DIALOG_PATHS['ok_button']).click()
@@ -387,31 +394,37 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
             time.sleep(0.2)
 
     except windows.ElementNotFound as e:
-        arqueo_logger.error(f'Element not found during duplicate check: {e}')
+        log_fail(arqueo_logger, 'DUP-CHECK', f'SICAL element not found: {e}')
         result.status = OperationStatus.FAILED
         result.error = f'Duplicate check error: {str(e)}'
     except Exception as e:
-        arqueo_logger.error(f'Error checking for duplicates: {e}')
+        log_fail(arqueo_logger, 'DUP-CHECK', str(e))
         result.status = OperationStatus.FAILED
         result.error = f'Duplicate check error: {str(e)}'
 
     return result
 
 @task
-def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
+def operacion_arqueo(operation_data: Dict[str, Any],
+                     task_id: Optional[str] = None) -> OperationResult:
     """
     Process an arqueo operation in SICAL system based on received message data.
 
     Args:
         operation_data: Dictionary containing the operation details from RabbitMQ message
+        task_id: Optional task id (used for logging/correlation).
 
     Returns:
-        OperationResult: Object containing the operation results and status
+        OperationResult: Object with operation status. When the contable
+        capture flag is ON and the operation is finalized, the captured
+        contable PDF envelope is stashed on the result as
+        ``result._contable_document`` for the consumer to attach to the
+        result message (kept off the dataclass to avoid bloating asdict).
     """
     # NOTE: COM initialization is now handled at the consumer thread level
     # to avoid COM state issues between successive task executions
 
-    arqueo_logger.info('Entry Operación arqueo: %s', operation_data)
+    log_detail(arqueo_logger, 'PARSED', f'raw operation_data: {operation_data}')
     init_time = datetime.now()
     result = OperationResult(
         status=OperationStatus.PENDING,
@@ -431,24 +444,21 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
         operation_type = operation_data.get('tipo', 'arqueo')
         detalle = operation_data.get('detalle', {})
 
-        arqueo_logger.info(f'Operation type: {operation_type}')
-
         datos_arqueo = create_arqueo_data(detalle)
-        arqueo_logger.debug('Created arqueo data: %s', datos_arqueo)
+        log_detail(arqueo_logger, 'PARSED', f'type={operation_type} datos_arqueo={datos_arqueo}')
 
         # Check for duplicates BEFORE opening arqueo window (if finalization flag is set)
         finalizar_operacion = datos_arqueo.get('finalizar_operacion', False)
         if finalizar_operacion:
-            arqueo_logger.info('Operation marked for finalization - checking for duplicates before opening window')
             result = _check_for_duplicates(datos_arqueo, result)
 
             # If duplicates found or check failed, abort before opening window
             if result.status == OperationStatus.P_DUPLICATED:
-                arqueo_logger.warning('Duplicate detected - aborting operation without opening arqueo window')
+                log_warn(arqueo_logger, 'DUP-CHECK', 'aborting - SICAL window not opened')
                 return result
 
             if result.status == OperationStatus.FAILED:
-                arqueo_logger.error('Duplicate check failed - aborting operation without opening arqueo window')
+                log_fail(arqueo_logger, 'DUP-CHECK', 'check failed - SICAL window not opened')
                 return result
 
             # Reset status to continue with operation
@@ -461,25 +471,27 @@ def operacion_arqueo(operation_data: Dict[str, Any]) -> OperationResult:
         if not setup_sical_window(window_manager):
             result.status = OperationStatus.FAILED
             result.error = "Failed to open SICAL window"
+            log_fail(arqueo_logger, 'SICAL-OPEN', 'could not open the arqueo window')
             return result
         else:
             result.sical_is_open = True
             result.status = OperationStatus.IN_PROGRESS
+            log_ok(arqueo_logger, 'SICAL-OPEN', 'arqueo window open')
 
         # Process operation (includes validation and printing if _FIN flag is set)
         # Note: Duplicate check is now performed above, before opening the window
         if TASK_CALLBACK:
             TASK_CALLBACK('step', step='Processing arqueo operation')
 
-        result = process_arqueo_operation(window_manager.ventana_arqueo, datos_arqueo, result)
+        result = process_arqueo_operation(window_manager.ventana_arqueo, datos_arqueo, result, task_id)
 
 
 
     except Exception as e:
-        arqueo_logger.exception("Error in arqueo operation")
+        log_fail(arqueo_logger, 'FAILED', f'unhandled error in arqueo operation: {e}', exc=True)
         result.status = OperationStatus.FAILED
         result.error = str(e)
-        
+
         if result.sical_is_open:
             handle_error_cleanup(window_manager.ventana_arqueo)
     
@@ -608,48 +620,50 @@ def setup_sical_window(window_manager: SicalWindowManager) -> bool:
     return bool(window_manager.ventana_arqueo)
 
 def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
-                           result: OperationResult) -> OperationResult:
+                           result: OperationResult,
+                           task_id: Optional[str] = None) -> OperationResult:
     """Process the arqueo operation in SICAL"""
-    arqueo_logger.info('Processing arqueo operation...')
     finalizar_operacion = datos_arqueo.get('finalizar_operacion', False)
-
-    arqueo_logger.info(f'Finalizar operation flag: {finalizar_operacion}')
+    log_detail(arqueo_logger, 'FILL', f'finalizar_operacion={finalizar_operacion}')
 
     try:
         # Phase 1: Initialize form and fill data
         # Note: Duplicate check is now performed in operacion_arqueo() before opening this window
-        arqueo_logger.debug('Initializing form and filling data')
+        log_phase(arqueo_logger, 'FILL', f'writing main panel + {len(datos_arqueo.get("aplicaciones", []))} aplicacion line(s)')
         ventana_arqueo.find('path:"2|4"').click()  # New button
         ventana_arqueo.find('class:"TButton" and path:"1|2"').click()  # Confirm
 
-        # Fill main data
-        arqueo_logger.warning('Trying to filling data')
         fill_main_panel_data(ventana_arqueo, datos_arqueo, result)
-        arqueo_logger.warning('finished to filling data') 
-        arqueo_logger.warning(f'result status: {str(result.status)}')
 
         if result.status != OperationStatus.FAILED:
             result.status = OperationStatus.COMPLETED
+            log_ok(arqueo_logger, 'FILL', f'data written (total={result.total_operacion})')
+        else:
+            log_fail(arqueo_logger, 'FILL', result.error or 'error writing data')
 
         # Phase 2: Validate and finalize if requested
         if result.status == OperationStatus.COMPLETED and finalizar_operacion:
-            arqueo_logger.info('Validating and finalizing operation')
-
             # Validate operation
             if TASK_CALLBACK:
                 TASK_CALLBACK('step', step='Validating operation')
             result = validate_operation(ventana_arqueo, result)
 
-            # Print document if validation succeeded
+            # Finalize: capture-and-return (new flow, behind flag) OR the
+            # legacy in-app print (flag OFF / default).
             if result.status == OperationStatus.COMPLETED:
-                if TASK_CALLBACK:
-                    TASK_CALLBACK('step', step='Printing operation document')
-                result = print_operation_document(ventana_arqueo, result)
+                if _contable_capture_enabled():
+                    if TASK_CALLBACK:
+                        TASK_CALLBACK('step', step='Capturing contable document')
+                    result = finalize_capture(ventana_arqueo, result, task_id)
+                else:
+                    if TASK_CALLBACK:
+                        TASK_CALLBACK('step', step='Printing operation document')
+                    result = print_operation_document(ventana_arqueo, result)
         else:
-            arqueo_logger.debug('Operation filled but not finalized (no _FIN suffix)')
+            log_ok(arqueo_logger, 'FILL', 'operation filled but not finalized (no _FIN)')
 
     except Exception as e:
-        arqueo_logger.exception('Error in process_arqueo_operation')
+        log_fail(arqueo_logger, 'FILL', f'error processing operation: {e}', exc=True)
         result.status = OperationStatus.FAILED
         result.error = str(e)
 
@@ -665,9 +679,9 @@ def abrir_ventana_opcion_en_menu(menu_a_buscar):
                    'TRATAMIENTO INDIVIDUALIZADO/RESUMEN')
     rama_tesoreria_pagos = ('TESORERIA', 'GESTION DE PAGOS', 'PROCESO DE ORDENACION Y PAGO')
 
-    app = windows.find_window('regex:.*FMenuSical', raise_error=False)
+    app = windows.find_window('regex:.*FMenuSical', raise_error=False, timeout=10.0)
     if not app:
-        arqueo_logger.error('SICAL main menu window not found - application may be closed')
+        log_fail(arqueo_logger, 'SICAL-OPEN', 'SICAL main menu window not found - app may be closed')
         return False
 
     if not menu_a_buscar:
@@ -767,7 +781,7 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
 
         for i, aplicacion in enumerate(datos_arqueo["aplicaciones"]):
 
-            arqueo_logger.info(f"APLICACION debug: {aplicacion} ")
+            log_detail(arqueo_logger, 'FILL', f'aplicacion[{i}] = {aplicacion}')
 
             # Report progress to GUI
             if TASK_CALLBACK:
@@ -822,31 +836,23 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
                     )
                     _contraido = aplicacion.get("contraido", False)
                     if not _contraido:
-                        arqueo_logger.info("NATURALEZA 5, not contraido. SEND ADITIONAL SEND KEYs")
+                        log_detail(arqueo_logger, 'FILL', 'naturaleza 5, sin contraido - {Tab}')
                         ventana_arqueo.send_keys(keys="{Tab}", wait_time=0.02, interval=0.02)
                     else:
-                        arqueo_logger.info(f"VALOR DEL CONTRAIDO: {_contraido}")
+                        log_detail(arqueo_logger, 'FILL', f'naturaleza 5, contraido={_contraido}')
                         #NOS POSICIONAMOS EN LA CELDA CONTRAIDO
                         time.sleep(1)
-                        arqueo_logger.info(f"enviamos TAB PARA POSICIONARNOS EN CONTRAIDO")
                         ventana_arqueo.send_keys(keys="{Tab}", wait_time=0.02, interval=0.02)
                         time.sleep(1)
 
                         if clean_value(_contraido) == True: #nuevo contraido
-                            # tenemos que enviar las siguientes teclas "({Alt}{Down} x 2) + {Fin} + {Enter}"
-                            arqueo_logger.critical(f"tenemos que enviar combinacion teclado para nuevo contraido ")
-                            arqueo_logger.critical(f"enviamos primer ALT + DOWN")
+                            log_detail(arqueo_logger, 'FILL', 'nuevo contraido: ALT+DOWN, END, ENTER')
                             ventana_arqueo.send_keys(keys="{Alt}{Down}", wait_time=1 )
-                            arqueo_logger.critical(f"enviamos SEGUNDO ALT + DOWN")
-                            #ventana_arqueo.send_keys(keys="{Alt}{Down}", wait_time=4 )
-                            arqueo_logger.critical(f"enviamos END")
                             ventana_arqueo.send_keys(keys="{End}", wait_time=1 )
-                            arqueo_logger.critical(f"enviamos ENTER")
                             ventana_arqueo.send_keys(keys="{Enter}", wait_time=1 )
                         else: #~contraido existente
-                            arqueo_logger.critical(f"contraido existente, escribimos su valor")
+                            log_detail(arqueo_logger, 'FILL', f'contraido existente: {_contraido}')
                             ventana_arqueo.send_keys(keys=_contraido)
-                            arqueo_logger.info(f"TODO;: PROCESS CONTRAIDO.....{aplicacion.get('contraido', 'sin contraido')}")
 
                     ventana_arqueo.send_keys(keys="{Tab}{Tab}{Tab}", wait_time=0.02, interval=0.02)
                     ventana_arqueo.send_keys(
@@ -907,8 +913,8 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
                             aplicacion["importe"].replace(",", ".")
                         )
 
-                else: 
-                    arqueo_logger.info(f"otra NATURALEZA ?? ... {naturaleza_operacion} ")   
+                else:
+                    log_warn(arqueo_logger, 'FILL', f'unhandled naturaleza: {naturaleza_operacion}')
                 
         total_aplicaciones = ventana_arqueo.find('path:"3|3|1"').get_value().replace(",", ".")
 
@@ -917,11 +923,10 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
         
 
     except Exception as e:
-        arqueo_logger.critical("Exception fillling operation data")
-        arqueo_logger
+        log_fail(arqueo_logger, 'FILL', f'exception filling operation data: {e}', exc=True)
         result.status = OperationStatus.FAILED
         result.error = f"Validation error: {str(e)}"
-    
+
     return result
         
 
@@ -941,12 +946,73 @@ def validate_operation(ventana_arqueo, result: OperationResult) -> OperationResu
         
         num_operacion = ventana_arqueo.find('class:"TEdit" and path:"3|4|14"').get_value()
         result.num_operacion = num_operacion
-        
+        log_ok(arqueo_logger, 'VALIDATE', f'operation validated -> num_operacion={num_operacion}')
+
     except Exception as e:
+        log_fail(arqueo_logger, 'VALIDATE', str(e), exc=True)
         result.status = OperationStatus.FAILED
         result.error = f"Validation error: {str(e)}"
-    
+
     return result
+
+def _contable_capture_enabled() -> bool:
+    """
+    Consumer-side rollout guard (spec v2). Default False: until this is ON
+    the legacy in-app print runs unchanged. Must be ON in tandem with
+    sical-robot's contableAssemblyEnabled flag for the new flow to work
+    end-to-end.
+    """
+    try:
+        import config
+        return bool(getattr(config, 'CONTABLE_CAPTURE_ENABLED', False))
+    except Exception:
+        return False
+
+
+def finalize_capture(ventana_arqueo, result: OperationResult,
+                     task_id: Optional[str] = None) -> OperationResult:
+    """
+    Capture the SICAL contable document to a PDF and stash the
+    `contable_document` envelope on the result for the consumer to attach
+    to the result message. sical-robot does the merge/print/portafirmas.
+
+    The SICAL operation is already committed by validate_operation(), so any
+    failure here only sets capture_status -- result.status is NEVER
+    regressed (mirrors print_operation_document's "completed whether
+    printed or not" semantics).
+    """
+    try:
+        import config
+        from doc_pipeline.capture_and_return import capture_and_return
+        envelope = capture_and_return(
+            ventana_arqueo, result.num_operacion, config)
+        result.capture_status = envelope.get('capture_status')
+        result.capture_error = envelope.get('capture_error')
+        # Out-of-band: not a dataclass field (keeps OperationEncoder small);
+        # the consumer reads this via getattr and puts it on the result msg.
+        setattr(result, '_contable_document', envelope)
+        if envelope.get('capture_status') == 'CAPTURED':
+            log_ok(arqueo_logger, 'CONTABLE',
+                   f"captured {envelope.get('page_count')}p / "
+                   f"{envelope.get('size_bytes')} B / "
+                   f"sha={(envelope.get('sha256') or '')[:12]} "
+                   f"-> returning to producer")
+        else:
+            log_fail(arqueo_logger, 'CONTABLE',
+                     envelope.get('capture_error') or 'capture failed')
+    except Exception as e:
+        log_fail(arqueo_logger, 'CONTABLE', f'unexpected: {e}', exc=True)
+        result.capture_status = 'FAILED'
+        result.capture_error = str(e)
+        setattr(result, '_contable_document', {
+            'capture_status': 'FAILED', 'capture_error': str(e), 'data': None
+        })
+
+    # The committed operation stays COMPLETED regardless of capture outcome.
+    if result.status != OperationStatus.FAILED:
+        result.status = OperationStatus.COMPLETED
+    return result
+
 
 def print_operation_document(ventana_arqueo, result: OperationResult) -> OperationResult:
     """Print TALÓN DE CARGO in SICAL"""
@@ -969,11 +1035,13 @@ def print_operation_document(ventana_arqueo, result: OperationResult) -> Operati
         boton_salir_click = ventana_visualizador_documentos.find('class:"TBitBtn" and path:"2|2|6"').click()
         #boton_guardar_pdf = ventana_visualizador_documentos.find('class:"TBitBtn" and path:"2|2|2"').click()
         result.status = OperationStatus.COMPLETED
+        log_ok(arqueo_logger, 'CONTABLE', 'Talon de Cargo printed in SICAL (legacy in-app)')
         return result
-    
+
     except Exception as e:
         result.status = OperationStatus.COMPLETED #OPERATION IS COMPLETED although doc iS PRINTER OR NOT
         result.error = f"Print document error: {str(e)}"
+        log_warn(arqueo_logger, 'CONTABLE', f'legacy print error (operation still COMPLETED): {e}')
     return result
 
 def handle_error_cleanup(ventana_arqueo):
