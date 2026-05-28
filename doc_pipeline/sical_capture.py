@@ -20,6 +20,8 @@ import time
 
 from robocorp import windows
 
+from sical_ui_utils import wait_for_window
+
 logger = logging.getLogger(__name__)
 
 
@@ -114,10 +116,19 @@ def capture_sical_pdf(ventana_arqueo, num_operacion, dest_dir):
 
     visor = None
     try:
-        # --- UNVERIFIED: open the document-type selector ------------------
-        ventana_arqueo.find('class:"TBitBtn" and name:"Documento"').click()
-        time.sleep(3)  # UNVERIFIED: wait for FseleccionTipoDoc to load
-        ventana_tipo = windows.find_window('regex:.*FseleccionTipoDoc')
+        # --- Open the document-type selector ------------------------------
+        # Reuse the window if it is already open; otherwise click Documento
+        # and poll for FseleccionTipoDoc to appear (robocorp's own timeout
+        # parameter is not reliably honoured -- we drive the wait ourselves).
+        ventana_tipo = wait_for_window(
+            'regex:.*FseleccionTipoDoc', timeout=0.5)
+        if not ventana_tipo:
+            ventana_arqueo.find('class:"TBitBtn" and name:"Documento"').click()
+            ventana_tipo = wait_for_window(
+                'regex:.*FseleccionTipoDoc', timeout=20.0)
+        if not ventana_tipo:
+            raise SicalCaptureError(
+                'FseleccionTipoDoc window did not open within 20s')
         ventana_tipo.find(
             'class:"TCheckBox" and path:"1|3" and name:"Talón de Cargo"'
         ).click()

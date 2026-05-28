@@ -147,6 +147,8 @@ arqueo_logger = get_logger(__name__)
 # Finalization flag constant
 FINALIZE_SUFFIX = '_FIN'
 
+from sical_ui_utils import wait_for_window
+
 def check_finalize_flag(texto: str) -> tuple:
     """
     Check if operation text ends with finalize flag and extract clean text.
@@ -218,8 +220,8 @@ class SicalWindowManager:
     def __init__(self):
         self.ventana_arqueo = None
 
-    def find_arqueo_window(self):
-        return windows.find_window('regex:.*SICAL II 4.2 mtec40', raise_error=False)
+    def find_arqueo_window(self, timeout: float = 5.0):
+        return wait_for_window(SICAL_WINDOWS['arqueo'], timeout=timeout)
 
     def close_window(self):
         if self.ventana_arqueo:
@@ -247,19 +249,34 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
         TASK_CALLBACK('step', step='Checking for duplicate operations')
 
     try:
-        # Setup consulta window
-        if not abrir_ventana_opcion_en_menu(SICAL_MENU_PATHS.get('consulta', None)):
-            result.status = OperationStatus.FAILED
-            result.error = 'Failed to open Consulta window'
-            return result
+        # Setup consulta window (retry once if it does not appear in time).
+        # First check if the window is already open from a prior attempt to
+        # avoid invoking the menu option twice (which would open a duplicate).
+        ventana_consulta = wait_for_window(SICAL_WINDOWS['consulta'], timeout=1.5)
 
-        time.sleep(1.0)
-        ventana_consulta = windows.find_window(SICAL_WINDOWS['consulta'], timeout=8.0, raise_error=False)
+        if ventana_consulta:
+            log_phase(arqueo_logger, 'DUP-CHECK', 'Consulta window already open, reusing')
+        else:
+            for attempt in (1, 2):
+                if not abrir_ventana_opcion_en_menu(SICAL_MENU_PATHS.get('consulta', None)):
+                    if attempt == 2:
+                        result.status = OperationStatus.FAILED
+                        result.error = 'Failed to open Consulta window'
+                        return result
+                    time.sleep(1.0)
+                    continue
 
-        if not ventana_consulta:
-            result.status = OperationStatus.FAILED
-            result.error = 'Consulta window not found'
-            return result
+                ventana_consulta = wait_for_window(SICAL_WINDOWS['consulta'], timeout=15.0)
+                if ventana_consulta:
+                    break
+
+                log_warn(arqueo_logger, 'DUP-CHECK',
+                         f'Consulta window not found on attempt {attempt}, retrying...')
+
+            if not ventana_consulta:
+                result.status = OperationStatus.FAILED
+                result.error = 'Consulta window not found after retry'
+                return result
 
         # Open filters window
         filtros_btton = ventana_consulta.find(CONSULTA_FORM_PATHS['filtros_button'],timeout=2.0, raise_error=False)
@@ -272,7 +289,7 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
 
         time.sleep(0.5)
 
-        filtros_window = windows.find_window(SICAL_WINDOWS['filtros'], timeout=8.0, raise_error=False)
+        filtros_window = wait_for_window(SICAL_WINDOWS['filtros'], timeout=15.0)
 
         if not filtros_window:
             result.status = OperationStatus.FAILED
@@ -609,15 +626,37 @@ def create_aplicaciones(aplicaciones_data: list) -> list:
     return aplicaciones
 
 def setup_sical_window(window_manager: SicalWindowManager) -> bool:
-    """Setup SICAL window for operation"""
-    rama_arqueo = ('TESORERIA', 'GESTION DE COBROS', 'ARQUEOS. APLICACION DIRECTA',
-                   'TRATAMIENTO INDIVIDUALIZADO/RESUMEN')
-    
-    if not abrir_ventana_opcion_en_menu(rama_arqueo):
-        return False
-    
-    window_manager.ventana_arqueo = window_manager.find_arqueo_window()
-    return bool(window_manager.ventana_arqueo)
+    """Setup SICAL window for operation.
+
+    The mtec40 arqueo window can take a while to open. Reuse it if already
+    open, otherwise open via menu with one retry and a longer wait.
+    """
+    rama_arqueo = SICAL_MENU_PATHS['arqueo']
+
+    # Reuse the window if it is already open (avoids opening a duplicate
+    # session via the menu).
+    ventana = window_manager.find_arqueo_window(timeout=0.5)
+    if ventana:
+        log_phase(arqueo_logger, 'SETUP', 'Arqueo (mtec40) window already open, reusing')
+        window_manager.ventana_arqueo = ventana
+        return True
+
+    for attempt in (1, 2):
+        if not abrir_ventana_opcion_en_menu(rama_arqueo):
+            if attempt == 2:
+                return False
+            time.sleep(1.0)
+            continue
+
+        ventana = window_manager.find_arqueo_window(timeout=15.0)
+        if ventana:
+            window_manager.ventana_arqueo = ventana
+            return True
+
+        log_warn(arqueo_logger, 'SETUP',
+                 f'Arqueo (mtec40) window not found on attempt {attempt}, retrying...')
+
+    return False
 
 def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
                            result: OperationResult,
@@ -1017,9 +1056,17 @@ def finalize_capture(ventana_arqueo, result: OperationResult,
 def print_operation_document(ventana_arqueo, result: OperationResult) -> OperationResult:
     """Print TALÓN DE CARGO in SICAL"""
     try:
-        ventana_arqueo.find('class:"TBitBtn" and name:"Documento"').click()
-        time.sleep(3) # Wait for Seleccion Tipo doc to load
-        ventana_seleccion_tipo_doc = windows.find_window('regex:.*FseleccionTipoDoc')
+        # Check if the FseleccionTipoDoc window is already open; only click
+        # "Documento" if it isn't, to avoid opening duplicates.
+        ventana_seleccion_tipo_doc = wait_for_window(
+            'regex:.*FseleccionTipoDoc', timeout=0.5)
+        if not ventana_seleccion_tipo_doc:
+            ventana_arqueo.find('class:"TBitBtn" and name:"Documento"').click()
+            ventana_seleccion_tipo_doc = wait_for_window(
+                'regex:.*FseleccionTipoDoc', timeout=15.0)
+        if not ventana_seleccion_tipo_doc:
+            raise windows.ElementNotFound(
+                'FseleccionTipoDoc window did not open within 15s')
         ventana_seleccion_tipo_doc.find('class:"TCheckBox" and path:"1|3" and name:"Talón de Cargo"').click()
         time.sleep(0.05)
         #deseleccionar carta de pago y seleccionar talón de cargo
