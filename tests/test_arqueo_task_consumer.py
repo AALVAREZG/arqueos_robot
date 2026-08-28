@@ -74,10 +74,6 @@ class TestSetupConnection:
         """Test that both input and result queues are declared as durable."""
         consumer = ArqueoConsumer()
 
-        # Verify both queues were declared
-        assert consumer.channel.queue_declare.call_count == 2
-
-        # Check the calls
         calls = consumer.channel.queue_declare.call_args_list
 
         # First call should be for the input queue
@@ -85,6 +81,22 @@ class TestSetupConnection:
 
         # Second call should be for the results queue
         assert calls[1][1] == {'queue': 'sical_results', 'durable': True}
+
+        # Tercera: la cola de latidos (spec §6.3). Sus argumentos tienen que
+        # coincidir EXACTAMENTE con los que declara el productor
+        # (sical-robot/src/services/rabbitmq/config.js, heartbeatQueueOptions):
+        # un `queue.declare` con argumentos distintos falla con
+        # PRECONDITION_FAILED y tumba el canal.
+        assert calls[2][1] == {
+            'queue': 'sical_heartbeat',
+            'durable': True,
+            'arguments': {
+                'x-message-ttl': 300000,
+                'x-max-length': 5000,
+                'x-overflow': 'drop-head',
+            },
+        }
+        assert consumer.channel.queue_declare.call_count == 3
 
     @pytest.mark.integration
     def test_qos_configuration(self, mock_rabbitmq_connection):
@@ -134,12 +146,24 @@ class TestCallback:
             delivery_tag=mock_rabbitmq_method.delivery_tag
         )
 
-        # Verify response was published to sical_results queue
-        consumer.channel.basic_publish.assert_called_once()
-        publish_call = consumer.channel.basic_publish.call_args
+        # Verify response was published to sical_results queue.
+        #
+        # No `assert_called_once`: el consumidor publica ademas latidos
+        # (spec §6.3) por el mismo canal, asi que se busca la publicacion del
+        # resultado por su cola en vez de contar llamadas.
+        publicaciones = consumer.channel.basic_publish.call_args_list
+        resultados = [c for c in publicaciones
+                      if c[1]['routing_key'] == 'sical_results']
+        assert len(resultados) == 1, publicaciones
+        publish_call = resultados[0]
 
         assert publish_call[1]['routing_key'] == 'sical_results'
         assert publish_call[1]['properties'].correlation_id == mock_rabbitmq_properties.correlation_id
+
+        # `hostname` es como el productor descubre el mapa de asientos (§3).
+        cuerpo = json.loads(publish_call[1]['body'])
+        assert cuerpo['hostname']
+        assert 'document_mode' in cuerpo
 
     @pytest.mark.integration
     def test_message_parsing(

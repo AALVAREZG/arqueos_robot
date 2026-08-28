@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -17,11 +17,44 @@ from robocorp.tasks import task
 # Optional task callback for GUI integration (progress updates)
 TASK_CALLBACK: Optional[Callable] = None
 
+# Latido a RabbitMQ (spec §6.3). Va en una ranura APARTE de TASK_CALLBACK, no
+# compartiendola: la GUI registra la suya en arqueos_gui.py y el consumidor
+# registra el latido, y con una sola ranura el ultimo en llegar borraba al
+# otro. Dos ranuras y un unico `notify_step` que llama a las dos.
+HEARTBEAT_CALLBACK: Optional[Callable] = None
+
 
 def set_task_callback(callback: Optional[Callable] = None):
     """Set the task callback function for GUI integration."""
     global TASK_CALLBACK
     TASK_CALLBACK = callback
+
+
+def set_heartbeat_callback(callback: Optional[Callable] = None):
+    """Registra el publicador de latidos del consumidor."""
+    global HEARTBEAT_CALLBACK
+    HEARTBEAT_CALLBACK = callback
+
+
+def notify_step(step: str, **kwargs) -> None:
+    """
+    Un paso del robot: a la GUI local y a RabbitMQ.
+
+    Publicarlo da tres cosas de golpe (spec §6.3): el timeout por silencio
+    -que deja de matar tareas vivas-, el progreso real en el Task Monitor y
+    los tiempos por fase en vivo. Nunca lanza: un latido perdido no puede
+    tumbar una operacion contable.
+    """
+    if TASK_CALLBACK:
+        try:
+            TASK_CALLBACK('step', step=step, **kwargs)
+        except Exception:  # noqa: BLE001
+            pass
+    if HEARTBEAT_CALLBACK:
+        try:
+            HEARTBEAT_CALLBACK(step, **kwargs)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 ###########
@@ -135,6 +168,9 @@ COMMON_DIALOG_PATHS = {
 }
 
 
+# Modo de documento: lo decide el productor y viaja en el mensaje (spec §4).
+import document_mode
+
 # Centralized phase-oriented logging (see logging_setup.py).
 from logging_setup import (
     get_logger, configure_logging, phase as log_phase, ok as log_ok,
@@ -193,6 +229,10 @@ class OperationEncoder(json.JSONEncoder):
                 'suma_aplicaciones': obj.suma_aplicaciones,
                 'sical_is_open': obj.sical_is_open,
                 'similiar_records_encountered': obj.similiar_records_encountered,
+                'duplicate_details': obj.duplicate_details,
+                'duplicate_check_metadata': obj.duplicate_check_metadata,
+                'duplicate_confirmation_token': obj.duplicate_confirmation_token,
+                'duplicate_token_expires_at': obj.duplicate_token_expires_at,
                 'capture_status': obj.capture_status,
                 'capture_error': obj.capture_error
             }
@@ -210,6 +250,14 @@ class OperationResult:
     suma_aplicaciones: Optional[float] = None
     sical_is_open: bool = False
     similiar_records_encountered: int = 0
+    # Duplicate detection details (populated when status is P_DUPLICATED)
+    duplicate_details: Optional[list] = field(default_factory=list)
+    duplicate_check_metadata: Optional[dict] = field(default_factory=dict)
+    # Confirmation token the producer must send back to force_create. Without
+    # these two fields sical-robot has nothing to store, and its "Confirm
+    # duplicate" action fails with "No duplicate confirmation token found".
+    duplicate_confirmation_token: Optional[str] = None
+    duplicate_token_expires_at: Optional[float] = None
     # Attachment-finalization ack (None when the task carried no attachment).
     # Contable-document capture ack (spec v2). The captured PDF itself is
     # carried out-of-band on the result message, not in this dataclass.
@@ -233,20 +281,65 @@ class SicalWindowManager:
             except Exception as e:
                 arqueo_logger.exception("Error closing window: %s", str(e))
 
-def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult) -> OperationResult:
+def _validate_force_create(operation_data: Dict[str, Any],
+                           detalle: Dict[str, Any],
+                           result: OperationResult) -> OperationResult:
+    """
+    Validate a force_create request before opening any SICAL window.
+
+    force_create means the duplicate check is deliberately skipped, so it is
+    only honoured when accompanied by a valid single-use token issued by a
+    prior Phase 1 check on this same operation. An invalid or missing token
+    fails the operation rather than silently falling back to creating it.
+
+    Args:
+        operation_data: Full operation dict (carries the token at its root)
+        detalle: The untransformed operation detail the token is bound to
+        result: Current operation result
+
+    Returns:
+        The result, set to FAILED when validation does not pass
+    """
+    from sical_security import get_confirmation_manager, audit_log_force_create
+
+    token_id = operation_data.get('duplicate_confirmation_token')
+
+    is_valid, error_msg = get_confirmation_manager().validate_token(token_id, detalle)
+    audit_log_force_create({**detalle,
+                            'duplicate_confirmation_token': token_id},
+                           is_valid, error_msg)
+
+    if not is_valid:
+        log_fail(arqueo_logger, 'SECURITY', f'invalid force_create: {error_msg}')
+        result.status = OperationStatus.FAILED
+        result.error = f'Security validation failed: {error_msg}'
+        return result
+
+    return result
+
+
+def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult,
+                          original_data: Optional[Dict[str, Any]] = None) -> OperationResult:
     """
     Check for duplicate operations using the Consulta window.
 
+    When similar records are found the operation is aborted with P_DUPLICATED
+    and a confirmation token is issued, so the producer can resend the same
+    operation with duplicate_policy='force_create' to override the check.
+
     Args:
-        datos_arqueo: Operation data to search for
+        datos_arqueo: Operation data to search for (transformed for SICAL)
         result: Current operation result
+        original_data: The untransformed `detalle` the token is bound to. The
+            producer resends this verbatim in Phase 2, so hashing it (rather
+            than the transformed copy) keeps validation stable. Falls back to
+            datos_arqueo when not supplied.
 
     Returns:
         Updated operation result with duplicate check status
     """
     log_phase(arqueo_logger, 'DUP-CHECK', 'checking for similar operations')
-    if TASK_CALLBACK:
-        TASK_CALLBACK('step', step='Checking for duplicate operations')
+    notify_step('Checking for duplicate operations')
 
     try:
         # Setup consulta window (retry once if it does not appear in time).
@@ -324,9 +417,7 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
         caja_field.send_keys(datos_arqueo['caja'], interval=0.01, wait_time=wait_time, send_enter=True)
 
         # Total of aplicaciones
-        if TASK_CALLBACK:
-            _text = f'processing aplicaciones: {datos_arqueo.get("aplicaciones")}'
-            TASK_CALLBACK('step', step=_text)
+        notify_step(f'processing aplicaciones: {datos_arqueo.get("aplicaciones")}')
         
         if datos_arqueo.get('aplicaciones') and len(datos_arqueo['aplicaciones']) > 0:
             total_importe = sum(
@@ -376,6 +467,28 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
             else:
                 result.similiar_records_encountered = 1  # At least one found
 
+            # Issue a confirmation token so the producer can override this
+            # abort via duplicate_policy='force_create'. Bound to the original
+            # (untransformed) data for hash consistency with Phase 2.
+            from sical_security import get_confirmation_manager
+
+            token_data = original_data if original_data is not None else datos_arqueo
+            token_id, expires_at = get_confirmation_manager().generate_token(token_data)
+
+            result.duplicate_details = []  # SICAL grid extraction not implemented
+            result.duplicate_confirmation_token = token_id
+            result.duplicate_token_expires_at = expires_at
+            result.duplicate_check_metadata = {
+                'check_id': datos_arqueo.get('duplicate_check_id'),
+                'check_timestamp': datetime.now().isoformat(),
+                'search_criteria': {
+                    'tercero': datos_arqueo.get('tercero'),
+                    'fecha': datos_arqueo.get('fecha'),
+                    'caja': datos_arqueo.get('caja'),
+                    'importe': total_importe_str,
+                },
+            }
+
             result.status = OperationStatus.P_DUPLICATED
             result.error = f'Possible duplicate operation found, similar records: {result.similiar_records_encountered}'
 
@@ -423,13 +536,18 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult)
 
 @task
 def operacion_arqueo(operation_data: Dict[str, Any],
-                     task_id: Optional[str] = None) -> OperationResult:
+                     task_id: Optional[str] = None,
+                     doc_mode: Optional[str] = None) -> OperationResult:
     """
     Process an arqueo operation in SICAL system based on received message data.
 
     Args:
         operation_data: Dictionary containing the operation details from RabbitMQ message
         task_id: Optional task id (used for logging/correlation).
+        doc_mode: Modo de documento pedido por el productor en el mensaje
+            (spec §4): 'legacy_print' | 'inline_capture' | 'deferred'. None =
+            el mensaje no lo trae y se cae a CONTABLE_CAPTURE_ENABLED, que a
+            partir de aqui es reserva y no interruptor.
 
     Returns:
         OperationResult: Object with operation status. When the contable
@@ -453,8 +571,7 @@ def operacion_arqueo(operation_data: Dict[str, Any],
 
     try:
         # Prepare operation data
-        if TASK_CALLBACK:
-            TASK_CALLBACK('step', step='Preparing operation data')
+        notify_step('Preparing operation data')
 
         # Extract tipo and detalle from operation_data
         # operation_data structure: {"tipo": "arqueo", "detalle": {...}}
@@ -462,28 +579,43 @@ def operacion_arqueo(operation_data: Dict[str, Any],
         detalle = operation_data.get('detalle', {})
 
         datos_arqueo = create_arqueo_data(detalle)
+        # Duplicate-policy fields travel at the message root, not inside
+        # `detalle`; carry them alongside the transformed data so the check has
+        # them available.
+        duplicate_policy = operation_data.get('duplicate_policy', 'abort_on_duplicate')
+        datos_arqueo['duplicate_check_id'] = operation_data.get('duplicate_check_id')
         log_detail(arqueo_logger, 'PARSED', f'type={operation_type} datos_arqueo={datos_arqueo}')
 
         # Check for duplicates BEFORE opening arqueo window (if finalization flag is set)
         finalizar_operacion = datos_arqueo.get('finalizar_operacion', False)
         if finalizar_operacion:
-            result = _check_for_duplicates(datos_arqueo, result)
+            if duplicate_policy == 'force_create':
+                # Phase 2: the operator already saw the duplicates and confirmed.
+                # Validate the token issued in Phase 1 instead of re-checking.
+                result = _validate_force_create(operation_data, detalle, result)
+                if result.status == OperationStatus.FAILED:
+                    log_fail(arqueo_logger, 'DUP-CHECK',
+                             'force_create rejected - SICAL window not opened')
+                    return result
+                log_ok(arqueo_logger, 'DUP-CHECK',
+                       'force_create confirmed - skipping duplicate check')
+            else:
+                result = _check_for_duplicates(datos_arqueo, result, original_data=detalle)
 
-            # If duplicates found or check failed, abort before opening window
-            if result.status == OperationStatus.P_DUPLICATED:
-                log_warn(arqueo_logger, 'DUP-CHECK', 'aborting - SICAL window not opened')
-                return result
+                # If duplicates found or check failed, abort before opening window
+                if result.status == OperationStatus.P_DUPLICATED:
+                    log_warn(arqueo_logger, 'DUP-CHECK', 'aborting - SICAL window not opened')
+                    return result
 
-            if result.status == OperationStatus.FAILED:
-                log_fail(arqueo_logger, 'DUP-CHECK', 'check failed - SICAL window not opened')
-                return result
+                if result.status == OperationStatus.FAILED:
+                    log_fail(arqueo_logger, 'DUP-CHECK', 'check failed - SICAL window not opened')
+                    return result
 
             # Reset status to continue with operation
             result.status = OperationStatus.PENDING
 
         # Setup SICAL window
-        if TASK_CALLBACK:
-            TASK_CALLBACK('step', step='Opening SICAL window')
+        notify_step('Opening SICAL window')
 
         if not setup_sical_window(window_manager):
             result.status = OperationStatus.FAILED
@@ -497,8 +629,7 @@ def operacion_arqueo(operation_data: Dict[str, Any],
 
         # Process operation (includes validation and printing if _FIN flag is set)
         # Note: Duplicate check is now performed above, before opening the window
-        if TASK_CALLBACK:
-            TASK_CALLBACK('step', step='Processing arqueo operation')
+        notify_step('Processing arqueo operation')
 
         result = process_arqueo_operation(window_manager.ventana_arqueo, datos_arqueo, result, task_id)
 
@@ -683,21 +814,28 @@ def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
         # Phase 2: Validate and finalize if requested
         if result.status == OperationStatus.COMPLETED and finalizar_operacion:
             # Validate operation
-            if TASK_CALLBACK:
-                TASK_CALLBACK('step', step='Validating operation')
+            notify_step('Validating operation')
             result = validate_operation(ventana_arqueo, result)
 
-            # Finalize: capture-and-return (new flow, behind flag) OR the
-            # legacy in-app print (flag OFF / default).
+            # Finalize: lo decide el modo de documento que viene en el
+            # mensaje (spec §4); CONTABLE_CAPTURE_ENABLED solo actua de reserva
+            # cuando el mensaje no lo trae.
             if result.status == OperationStatus.COMPLETED:
-                if _contable_capture_enabled():
-                    if TASK_CALLBACK:
-                        TASK_CALLBACK('step', step='Capturing contable document')
+                fallback = _contable_capture_enabled()
+                if document_mode.should_capture(doc_mode, fallback):
+                    notify_step('Capturing contable document')
                     result = finalize_capture(ventana_arqueo, result, task_id)
-                else:
-                    if TASK_CALLBACK:
-                        TASK_CALLBACK('step', step='Printing operation document')
+                elif document_mode.should_print(doc_mode, fallback):
+                    notify_step('Printing operation document')
                     result = print_operation_document(ventana_arqueo, result)
+                else:
+                    # `deferred`: el robot de operaciones no toca documentos.
+                    # El Talon de Cargo queda pendiente y lo encola el
+                    # productor. El invariante cambia -COMPLETED ya no implica
+                    # que el documento exista- y por eso el atraso tiene que
+                    # verse en el Task Monitor (spec §5).
+                    log_ok(arqueo_logger, 'CONTABLE',
+                           'document_mode=deferred: documento aplazado al robot de documentos')
         else:
             log_ok(arqueo_logger, 'FILL', 'operation filled but not finalized (no _FIN)')
 
@@ -822,15 +960,14 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
 
             log_detail(arqueo_logger, 'FILL', f'aplicacion[{i}] = {aplicacion}')
 
-            # Report progress to GUI
-            if TASK_CALLBACK:
-                partida = aplicacion.get("partida", "N/A")
-                importe = aplicacion.get("importe", "0.00")
-                line_details = f"Budget: {partida}, Amount: €{importe}"
-                TASK_CALLBACK('step',
-                            step=f'Processing line item {i+1} of {len(datos_arqueo["aplicaciones"])}',
-                            current_line_item=i+1,
-                            line_item_details=line_details)
+            # Report progress to GUI (y a RabbitMQ: cada linea es una noticia
+            # mas que rearma la ventana de silencio del productor).
+            partida = aplicacion.get("partida", "N/A")
+            importe = aplicacion.get("importe", "0.00")
+            notify_step(
+                f'Processing line item {i+1} of {len(datos_arqueo["aplicaciones"])}',
+                current_line_item=i + 1,
+                line_item_details=f"Budget: {partida}, Amount: €{importe}")
 
             if (float(aplicacion["importe"].replace(",", ".")) > 0.0):  
                 # si el importe de la partida es mayor que cero

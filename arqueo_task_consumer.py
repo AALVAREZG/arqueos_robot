@@ -3,10 +3,13 @@
 import pika
 import json
 import dataclasses
+import socket
 import comtypes
 from typing import Optional, Callable
 from config import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
-from arqueo_tasks import OperationEncoder, operacion_arqueo
+from arqueo_tasks import OperationEncoder, operacion_arqueo, set_heartbeat_callback
+import document_mode as document_mode_mod
+from rabbit_heartbeat import HeartbeatPublisher
 from logging_setup import (
     configure_logging, get_logger, bind_task, unbind_task,
     phase as log_phase, ok as log_ok, warn as log_warn,
@@ -50,7 +53,13 @@ class ArqueoConsumer:
         self.connection: Optional[pika.BlockingConnection] = None
         self.channel: Optional[pika.channel.Channel] = None
         self.queue_name = 'sical_queue.arqueo'
+        # Latido a RabbitMQ (spec §6.3). `arqueo_tasks` ya generaba estos pasos
+        # via TASK_CALLBACK, pero el consumidor nunca lo registraba: iban solo
+        # a la GUI y se perdian. Registrarlo es todo el cambio.
+        self.heartbeat: Optional[HeartbeatPublisher] = None
+        self.hostname = socket.gethostname()
         self.setup_connection()
+        set_heartbeat_callback(self._publish_heartbeat)
 
     def setup_connection(self):
         """Establish connection to RabbitMQ"""
@@ -85,6 +94,10 @@ class ArqueoConsumer:
 
             # Set QoS to handle one message at a time
             self.channel.basic_qos(prefetch_count=1)
+
+            self.heartbeat = HeartbeatPublisher(self.channel, 'arqueo', logger)
+            self.heartbeat.declare()
+
             log_ok(logger, 'CONN', 'RabbitMQ connected')
 
             if STATUS_CALLBACK:
@@ -95,6 +108,23 @@ class ArqueoConsumer:
             if STATUS_CALLBACK:
                 STATUS_CALLBACK('disconnected')
             raise
+
+    def _publish_heartbeat(self, step, **_kwargs):
+        """
+        Publica cada paso del robot a RabbitMQ.
+
+        Ranura propia, separada de TASK_CALLBACK: la GUI registra la suya y con
+        una sola el ultimo en llegar borraba al otro.
+
+        Cada paso rearma la ventana de silencio del productor (§6.4): pasa de
+        preguntar «¿han pasado 75 s desde que publique?» -que mata tareas
+        vivas- a «¿han pasado 75 s sin noticias de esta tarea?». Nunca lanza.
+        """
+        try:
+            if self.heartbeat and step:
+                self.heartbeat.beat(step)
+        except Exception as exc:  # noqa: BLE001
+            log_detail(logger, 'HEARTBEAT', f'publish failed: {exc}')
 
     def callback(self, ch, method, properties, body):
         """
@@ -111,6 +141,18 @@ class ArqueoConsumer:
                       f"arqueo task {task_id} (corr={properties.correlation_id})")
             log_detail(logger, 'RECEIVED', f"payload={data}")
 
+            # Modo de documento: lo decide el productor y viaja en el
+            # mensaje (spec §4). El consumidor deja de tener interruptor;
+            # CONTABLE_CAPTURE_ENABLED queda como reserva para mensajes que no
+            # traigan el campo, lo que permite desplegar el productor primero.
+            doc_mode = document_mode_mod.document_mode_from_message(data)
+            log_detail(logger, 'PARSED',
+                       f'document_mode={doc_mode or "(reserva CONTABLE_CAPTURE_ENABLED)"}')
+
+            if self.heartbeat:
+                self.heartbeat.bind(properties.correlation_id, task_id=task_id)
+                self.heartbeat.beat('Task received')
+
             # Notify GUI: task received
             if STATUS_CALLBACK:
                 STATUS_CALLBACK('task_received', task_id=task_id)
@@ -118,6 +160,17 @@ class ArqueoConsumer:
             # Extract operation details (the real data is inside 'detalle')
             operation = data.get('operation_data', {}).get('operation', {})
             detalle = operation.get('detalle', {})
+
+            # Duplicate-policy fields are sent at the message root by
+            # sical-robot's createTaskMessage, but operacion_arqueo only sees
+            # the `operation` dict. Merge them down so the two-phase duplicate
+            # flow (check_only -> force_create + token) reaches the processor.
+            for policy_field in ('duplicate_policy', 'duplicate_confirmation_token',
+                                 'duplicate_check_id'):
+                if policy_field in data and policy_field not in operation:
+                    operation[policy_field] = data[policy_field]
+                    log_detail(logger, 'PARSED',
+                               f'merged {policy_field} from message root')
             log_detail(logger, 'PARSED',
                        f"operation keys={list(operation.keys())} "
                        f"detalle keys={list(detalle.keys())}")
@@ -168,14 +221,21 @@ class ArqueoConsumer:
             result = operacion_arqueo(
                 data['operation_data']['operation'],
                 task_id,
+                doc_mode=doc_mode,
             )
 
             log_detail(logger, 'RESULT', f"OperationResult={result}")
             # Prepare response
+            # `hostname` es como el productor descubre el mapa de asientos
+            # (spec §3): un asiento ES una maquina, y el asiento se descubre,
+            # no se configura -mover este consumidor a una VM nueva no exige
+            # tocar ningun JSON-.
             response = {
                 'status': result.status.value,
                 'operation_id': task_id,
-                'result': dataclasses.asdict(result)
+                'result': dataclasses.asdict(result),
+                'hostname': self.hostname,
+                'document_mode': doc_mode,
             }
 
             # Spec v2 §2.2: return the captured contable PDF envelope
@@ -236,6 +296,8 @@ class ArqueoConsumer:
             if STATUS_CALLBACK and task_id:
                 STATUS_CALLBACK('task_failed', task_id=task_id)
         finally:
+            if self.heartbeat:
+                self.heartbeat.unbind()
             unbind_task()
 
     def start_consuming(self):

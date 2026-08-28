@@ -39,11 +39,17 @@ def _as_bool(value, default=False):
     return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
 
 
-# Rollout guard. ACTIVATED: the consumer captures the contable PDF and
-# returns it instead of the legacy in-app print. Must stay ON in tandem
-# with sical-robot's contableAssemblyEnabled (both ON together), otherwise
-# the document is captured but never printed/staged. Set the env var
-# CONTABLE_CAPTURE_ENABLED=false to roll back without a code change.
+# RESERVA, ya no interruptor.
+#
+# La decision de que hacer con el documento la toma ahora el productor y viaja
+# en el mensaje, en `parameters.document_mode` (ver document_mode.py y la spec
+# `sical-robot/docs/document-robot-split-spec.md`, §4). Este valor solo se
+# consulta cuando el mensaje NO trae el campo -consumidor nuevo contra
+# productor viejo-, que es lo que permite desplegar el productor primero.
+#
+# Se retira cuando los tres consumidores entiendan el campo. Mientras tanto
+# conserva su significado antiguo: ON = capturar y devolver, OFF = imprimir en
+# SICAL. Sigue en ON porque asi estaba, no porque decida nada nuevo.
 CONTABLE_CAPTURE_ENABLED = _as_bool(
     os.getenv('CONTABLE_CAPTURE_ENABLED', 'true'), True)
 
