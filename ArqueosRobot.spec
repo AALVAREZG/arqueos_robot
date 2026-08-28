@@ -11,11 +11,15 @@ a = Analysis(
         'pika',
         'dotenv',
         'tenacity',
-        'rpaframework',
+        # `rpaframework` es el nombre del paquete en PyPI; el modulo que se
+        # importa es `RPA`. Pedirlo por el nombre de PyPI hacia que cada
+        # compilacion imprimiera tres ERROR de import inexistente -junto a
+        # robocorp.browser y robocorp.truststore, que no estan instalados-, y
+        # una compilacion que siempre da errores ensena a ignorarlos.
+        'RPA',
+        'RPA.Windows',
         'robocorp',
-        'robocorp.browser',
         'robocorp.windows',
-        'robocorp.truststore',
         'tkinter',
         'tkinter.ttk',
         'tkinter.scrolledtext',
