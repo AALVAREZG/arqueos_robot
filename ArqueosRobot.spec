@@ -22,6 +22,12 @@ a = Analysis(
         'tkinter.filedialog',
         'tkinter.messagebox',
         'sqlite3',
+        # Modulos del proyecto que entran por import directo. Se listan
+        # explicitamente igual que en gastos_robot.spec: el analisis estatico
+        # los encuentra, pero la lista es la que documenta que existen.
+        'document_mode',
+        'rabbit_heartbeat',
+        'logging_setup',
         'json',
         'threading',
         'logging',
