@@ -34,6 +34,7 @@ ARQUEOS_LOG_LEVEL=DEBUG for the verbose internals (keystrokes, payloads).
 
 import contextvars
 import logging
+import gui_log_filter
 import os
 import sys
 
@@ -129,11 +130,14 @@ def configure_logging(gui_handler=None):
 
     if gui_handler is not None and not any(
             getattr(h, 'name', '') == 'arqueos_gui' for h in root.handlers):
-        # GUI shows only the clean phase stream (INFO+), never DEBUG
-        # internals nor third-party noise.
-        gui_handler.setLevel(logging.INFO)
+        # La ventana recibe solo el flujo limpio de fases (INFO+) y solo de
+        # codigo nuestro. `_NOISY` baja a WARNING a los sospechosos habituales,
+        # pero es una lista negra: no cubre a `fontTools` -una veintena de
+        # loggers el solo-, `RobotFramework`, `WDM`... ni a un WARNING de
+        # robocorp. El filtro de lista blanca cierra eso (ver gui_log_filter).
         gui_handler.setFormatter(_GuiFormatter())
         gui_handler.set_name('arqueos_gui')
+        gui_log_filter.install(gui_handler, level=logging.INFO)
         root.addHandler(gui_handler)
 
     return root

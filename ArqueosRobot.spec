@@ -30,6 +30,7 @@ a = Analysis(
         # explicitamente igual que en gastos_robot.spec: el analisis estatico
         # los encuentra, pero la lista es la que documenta que existen.
         'document_mode',
+        'gui_log_filter',
         'rabbit_heartbeat',
         'logging_setup',
         'json',
