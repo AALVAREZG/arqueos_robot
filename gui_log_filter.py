@@ -35,6 +35,7 @@ OWN_LOGGERS = frozenset({
     'document_mode',
     'logging_setup',
     'rabbit_heartbeat',
+    'run_trace',
     'sical_security',
     'sical_ui_utils',
     'status_manager',

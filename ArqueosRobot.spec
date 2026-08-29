@@ -31,6 +31,7 @@ a = Analysis(
         # los encuentra, pero la lista es la que documenta que existen.
         'document_mode',
         'gui_log_filter',
+        'run_trace',
         'rabbit_heartbeat',
         'logging_setup',
         'json',

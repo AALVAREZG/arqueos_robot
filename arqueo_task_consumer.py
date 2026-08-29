@@ -10,6 +10,7 @@ from config import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
 from arqueo_tasks import OperationEncoder, operacion_arqueo, set_heartbeat_callback
 import document_mode as document_mode_mod
 from rabbit_heartbeat import HeartbeatPublisher
+import run_trace
 from logging_setup import (
     configure_logging, get_logger, bind_task, unbind_task,
     phase as log_phase, ok as log_ok, warn as log_warn,
@@ -149,6 +150,18 @@ class ArqueoConsumer:
             log_detail(logger, 'PARSED',
                        f'document_mode={doc_mode or "(reserva CONTABLE_CAPTURE_ENABLED)"}')
 
+            # Rastro: el mensaje entero tal como llego. Es lo primero que hay
+            # que poder mirar cuando el resultado no cuadra -saber si el robot
+            # hizo algo raro con datos buenos, o algo razonable con datos
+            # malos, sin tener que reconstruirlo desde el productor.
+            run_trace.bind(task_id)
+            run_trace.event('message_in',
+                            correlation_id=properties.correlation_id,
+                            document_mode=doc_mode,
+                            schema_version=data.get('schema_version'),
+                            duplicate_policy=data.get('duplicate_policy'),
+                            operation=data.get('operation_data', {}).get('operation'))
+
             if self.heartbeat:
                 self.heartbeat.bind(properties.correlation_id, task_id=task_id)
                 self.heartbeat.beat('Task received')
@@ -257,6 +270,20 @@ class ArqueoConsumer:
                 log_detail(logger, 'RESULT',
                            'no contable (capture flag OFF or not finalized)')
 
+            contable_tr = getattr(result, '_contable_document', None) or {}
+            run_trace.event('result_out',
+                            status=result.status.value,
+                            num_operacion=result.num_operacion,
+                            total_operacion=result.total_operacion,
+                            duration=result.duration,
+                            error=result.error,
+                            document_mode=doc_mode,
+                            capture_status=contable_tr.get('capture_status'),
+                            capture_error=contable_tr.get('capture_error'),
+                            contable_sha256=contable_tr.get('sha256'),
+                            contable_size=contable_tr.get('size_bytes'),
+                            contable_pages=contable_tr.get('page_count'))
+
             # Send response back through RabbitMQ to sical_results queue
             ch.basic_publish(
                 exchange='',
@@ -288,6 +315,7 @@ class ArqueoConsumer:
                                 task_id=task_id, capture_info=capture_info)
 
         except Exception as e:
+            run_trace.exception('consumer_error', e)
             log_fail(logger, 'CONSUMER', f"error processing message: {e}", exc=True)
             # Negative acknowledgment - message will be requeued
             ch.basic_nack(delivery_tag=method.delivery_tag)
@@ -298,6 +326,7 @@ class ArqueoConsumer:
         finally:
             if self.heartbeat:
                 self.heartbeat.unbind()
+            run_trace.unbind()
             unbind_task()
 
     def start_consuming(self):

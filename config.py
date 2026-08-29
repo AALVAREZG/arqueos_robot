@@ -64,3 +64,16 @@ SICAL_PDF_WORKDIR = os.getenv(
 # consumer reports a capture failure (no storage backend on the consumer in
 # Phase A'); a Talon de Cargo is far below this.
 MAX_INLINE_BYTES = int(os.getenv('MAX_INLINE_BYTES', 2 * 1024 * 1024))
+
+
+# ---------------------------------------------------------------------------
+# Duplicate confirmation tokens (see sical_security.py)
+# ---------------------------------------------------------------------------
+
+# How long a confirmation token issued on P_DUPLICATED stays valid. The operator
+# has to notice the flagged task in sical-robot's Task Monitor and press
+# "Confirm duplicate" within this window, so it is deliberately longer than the
+# 300s used by gastos_robot. Tokens are held in memory: restarting the consumer
+# invalidates them regardless of this setting.
+DUPLICATE_TOKEN_LIFETIME_SECONDS = int(
+    os.getenv('DUPLICATE_TOKEN_LIFETIME_SECONDS', 3600))

@@ -35,6 +35,7 @@ ARQUEOS_LOG_LEVEL=DEBUG for the verbose internals (keystrokes, payloads).
 import contextvars
 import logging
 import gui_log_filter
+import run_trace
 import os
 import sys
 
@@ -93,6 +94,25 @@ class _GuiFormatter(logging.Formatter):
         return f"{head} | {record.getMessage()}" if head else record.getMessage()
 
 
+class _FileFormatter(logging.Formatter):
+    """Como el de consola pero con fecha completa, milisegundos y el logger.
+
+    En el fichero si interesa saber QUIEN dijo cada cosa: cuando algo falla en
+    SICAL, la mitad de la respuesta esta en si la linea la escribio
+    `arqueo_tasks` o una biblioteca de terceros.
+    """
+
+    def format(self, record):
+        ts = self.formatTime(record, '%Y-%m-%d %H:%M:%S')
+        line = (f"{ts}.{int(record.msecs):03d} {record.levelname:<7} "
+                f"task={_task_of(record):<22} "
+                f"{_phase_of(record):<10} "
+                f"{record.name:<26} {record.getMessage()}")
+        if record.exc_info:
+            line += "\n" + self.formatException(record.exc_info)
+        return line
+
+
 # Third-party libraries that flood the stream; pinned to WARNING.
 _NOISY = ('pika', 'comtypes', 'urllib3', 'PIL', 'robocorp', 'RPA',
           'asyncio', 'charset_normalizer')
@@ -139,6 +159,17 @@ def configure_logging(gui_handler=None):
         gui_handler.set_name('arqueos_gui')
         gui_log_filter.install(gui_handler, level=logging.INFO)
         root.addHandler(gui_handler)
+
+    # Rastro en disco (run_trace): el fichero va a DEBUG aunque la consola vaya
+    # a INFO. Es el punto — la pantalla se mantiene limpia y el disco se queda
+    # con todo, que es lo unico que queda para mirar cuando una ejecucion real
+    # sale rara y la ventana ya se cerro.
+    #
+    # Al final y no arriba: init anuncia donde escribe, y ese aviso tiene que
+    # llegar tambien a la ventana. init() es idempotente.
+    run_trace.init('arqueos', formatter=_FileFormatter(), extra={
+        'log_level_consola': level_name,
+    })
 
     return root
 

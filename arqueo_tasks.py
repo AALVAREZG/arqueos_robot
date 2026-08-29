@@ -36,15 +36,33 @@ def set_heartbeat_callback(callback: Optional[Callable] = None):
     HEARTBEAT_CALLBACK = callback
 
 
+# Marca del paso anterior, para poder decir cuanto tardo cada uno.
+_ultimo_paso = {'t': None, 'nombre': None}
+
+
 def notify_step(step: str, **kwargs) -> None:
     """
-    Un paso del robot: a la GUI local y a RabbitMQ.
+    Un paso del robot: a la GUI local, a RabbitMQ y al rastro en disco.
 
     Publicarlo da tres cosas de golpe (spec §6.3): el timeout por silencio
     -que deja de matar tareas vivas-, el progreso real en el Task Monitor y
     los tiempos por fase en vivo. Nunca lanza: un latido perdido no puede
     tumbar una operacion contable.
+
+    En el rastro cada paso lleva **cuanto tardo el anterior**. Es lo que
+    convierte una lista de pasos en un diagnostico: sin esa cifra se ve que el
+    robot llego hasta cierto punto, con ella se ve donde se quedo parado.
     """
+    ahora = time.time()
+    previo = _ultimo_paso['t']
+    run_trace.event(
+        'step', step=step,
+        paso_anterior=_ultimo_paso['nombre'],
+        segundos_del_anterior=None if previo is None else round(ahora - previo, 3),
+        **kwargs)
+    _ultimo_paso['t'] = ahora
+    _ultimo_paso['nombre'] = step
+
     if TASK_CALLBACK:
         try:
             TASK_CALLBACK('step', step=step, **kwargs)
@@ -170,6 +188,7 @@ COMMON_DIALOG_PATHS = {
 
 # Modo de documento: lo decide el productor y viaja en el mensaje (spec §4).
 import document_mode
+import run_trace
 
 # Centralized phase-oriented logging (see logging_setup.py).
 from logging_setup import (
@@ -840,6 +859,8 @@ def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
             log_ok(arqueo_logger, 'FILL', 'operation filled but not finalized (no _FIN)')
 
     except Exception as e:
+        run_trace.exception('operation_error', e,
+                            num_operacion=result.num_operacion)
         log_fail(arqueo_logger, 'FILL', f'error processing operation: {e}', exc=True)
         result.status = OperationStatus.FAILED
         result.error = str(e)
@@ -1122,9 +1143,11 @@ def validate_operation(ventana_arqueo, result: OperationResult) -> OperationResu
         
         num_operacion = ventana_arqueo.find('class:"TEdit" and path:"3|4|14"').get_value()
         result.num_operacion = num_operacion
+        run_trace.event('validated', num_operacion=num_operacion)
         log_ok(arqueo_logger, 'VALIDATE', f'operation validated -> num_operacion={num_operacion}')
 
     except Exception as e:
+        run_trace.exception('validate_error', e)
         log_fail(arqueo_logger, 'VALIDATE', str(e), exc=True)
         result.status = OperationStatus.FAILED
         result.error = f"Validation error: {str(e)}"
@@ -1167,6 +1190,15 @@ def finalize_capture(ventana_arqueo, result: OperationResult,
         # Out-of-band: not a dataclass field (keeps OperationEncoder small);
         # the consumer reads this via getattr and puts it on the result msg.
         setattr(result, '_contable_document', envelope)
+        run_trace.event('contable',
+                        via='finalize_capture',
+                        num_operacion=result.num_operacion,
+                        capture_status=envelope.get('capture_status'),
+                        capture_error=envelope.get('capture_error'),
+                        sha256=envelope.get('sha256'),
+                        size_bytes=envelope.get('size_bytes'),
+                        page_count=envelope.get('page_count'),
+                        filename=envelope.get('filename'))
         if envelope.get('capture_status') == 'CAPTURED':
             log_ok(arqueo_logger, 'CONTABLE',
                    f"captured {envelope.get('page_count')}p / "
