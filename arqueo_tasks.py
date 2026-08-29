@@ -650,7 +650,8 @@ def operacion_arqueo(operation_data: Dict[str, Any],
         # Note: Duplicate check is now performed above, before opening the window
         notify_step('Processing arqueo operation')
 
-        result = process_arqueo_operation(window_manager.ventana_arqueo, datos_arqueo, result, task_id)
+        result = process_arqueo_operation(window_manager.ventana_arqueo, datos_arqueo,
+                                          result, task_id, doc_mode=doc_mode)
 
 
 
@@ -810,8 +811,15 @@ def setup_sical_window(window_manager: SicalWindowManager) -> bool:
 
 def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
                            result: OperationResult,
-                           task_id: Optional[str] = None) -> OperationResult:
-    """Process the arqueo operation in SICAL"""
+                           task_id: Optional[str] = None,
+                           doc_mode: Optional[str] = None) -> OperationResult:
+    """Process the arqueo operation in SICAL.
+
+    `doc_mode` es el modo de documento que trae el mensaje (spec §4). Llega
+    como parametro y no se lee del ambito de `operacion_arqueo`: el bloque de
+    finalizacion vive aqui, y darlo por heredado costo una operacion real
+    creada en SICAL (26000964) que el productor registro como FALLIDA.
+    """
     finalizar_operacion = datos_arqueo.get('finalizar_operacion', False)
     log_detail(arqueo_logger, 'FILL', f'finalizar_operacion={finalizar_operacion}')
 
