@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -337,6 +338,259 @@ def _validate_force_create(operation_data: Dict[str, Any],
     return result
 
 
+# =============================================================================
+# CAMPOS DE FECHA DE LA VENTANA DE FILTROS (FilOpera)
+# =============================================================================
+#
+# SICAL valida el rango al salir de `fecha_desde`: si la fecha que se escribe
+# es POSTERIOR a la `fecha_hasta` que el campo ya tenia, levanta un modal de
+# Error y bloquea la consulta. Y ese modal se cuela como hijo 1 de la ventana,
+# desplazando todos los `path:"2|N"` a `3|N`, asi que la busqueda siguiente
+# (justamente `fecha_hasta`, 2|17) agota 10 s y se reporta un `path` en vez
+# del mensaje de SICAL. Ocho de los nueve fallos del 31/08/2026 son eso.
+#
+# La condicion se cumple porque FilOpera se REUTILIZA: cuando la tarea
+# anterior la deja abierta, los dos campos conservan su fecha.
+#
+# Reordenar los campos no vale: escribir `hasta` primero deja el `desde`
+# viejo comparandose contra el `hasta` nuevo, y falla igual en el caso
+# simetrico (fecha nueva anterior a la que habia).
+#
+# Y VACIAR los campos tampoco es una salida: `{Ctrl}a` no lo procesa un
+# TMaskEdit de Delphi (solo funciona en campos de texto corrientes), asi que
+# no hay forma fiable de dejarlos en blanco por teclado.
+#
+# La salida es ENSANCHAR PRIMERO Y ESTRECHAR DESPUES, que no necesita vaciar
+# nada y es correcta venga la fecha nueva por delante o por detras:
+#
+#   1. `hasta` = 31/12/2099   -> cualquier `desde` heredado es <= ese tope
+#   2. `desde` = fecha        -> <= 31/12/2099
+#   3. `hasta` = fecha        -> == `desde`
+#
+# En ningun paso el `desde` supera al `hasta`, asi que la validacion no
+# dispara. La escritura en si va con ocho retrocesos por delante, que es lo
+# unico que deja el cursor en la primera posicion de la mascara; ver
+# `_escribir_fecha`.
+
+
+def _fecha_solo_digitos(fecha: Any, etiqueta: str) -> str:
+    """Normaliza a los 8 digitos DDMMAAAA que espera la mascara.
+
+    El productor ya publica la fecha sin barras (`sanitizeArqueoFecha`), asi
+    que esto es cinturon: si algun dia vuelve a llegar con separadores por un
+    camino nuevo, se para aqui con el valor delante en vez de mascarse contra
+    la mascara.
+    """
+    digitos = re.sub(r'\D', '', str(fecha if fecha is not None else ''))
+    if len(digitos) != 8:
+        raise ValueError(
+            f'{etiqueta}: se esperaban 8 digitos DDMMAAAA y llego "{fecha}"')
+    return digitos
+
+
+def _fecha_con_barras(digitos: str) -> str:
+    """DDMMAAAA -> DD/MM/AAAA, que es como lo devuelve el campo al leerlo."""
+    return f'{digitos[0:2]}/{digitos[2:4]}/{digitos[4:8]}'
+
+
+# Tope superior provisional del paso 1. Cualquier fecha de un arqueo real es
+# anterior, que es lo unico que se le pide.
+FECHA_TOPE_SUPERIOR = '31122099'
+
+# Ocho retrocesos: una por cada posicion de digito de la mascara DD/MM/AAAA.
+# Se construye repitiendo `{BACK}` en vez de usar la forma con contador
+# (`{BACK 8}`) para no depender de como la parsea la libreria.
+BORRAR_CAMPO_FECHA = '{BACK}' * 8
+
+
+def _misma_fecha(leido: Optional[str], digitos: str) -> Optional[bool]:
+    """Compara lo leido del campo con la fecha pedida, por COMPONENTES.
+
+    SICAL rellena los grupos con espacios, no con ceros: al salir del campo
+    deja "20/ 7/2026", que es exactamente 20/07/2026. Comparar quitando los
+    no-digitos daba "2072026" -- siete digitos -- y no igualaba nunca, asi que
+    la comprobacion rechazaba fechas perfectamente escritas.
+
+    Devuelve None cuando lo leido no se puede interpretar, para que quien
+    llame lo acepte en vez de tumbar la operacion.
+    """
+    partes = [p.strip() for p in (leido or '').split('/')]
+    if len(partes) != 3 or not all(p.isdigit() for p in partes):
+        return None
+    dia, mes, anio = (int(p) for p in partes)
+    return (dia, mes, anio) == (int(digitos[0:2]), int(digitos[2:4]),
+                                int(digitos[4:8]))
+
+
+def _escribir_fecha(campo, digitos: str, etiqueta: str, wait_time: float) -> None:
+    """Escribe la fecha y comprueba que el campo quedo con ella.
+
+    La comprobacion no bloquea cuando el campo no se puede LEER (get_value
+    devuelve None o vacio): distinguir "no legible" de "vacio" no es posible,
+    y tumbar una operacion buena por no poder leer un campo seria peor que el
+    fallo del que protege. Mismo criterio que `nombra_operacion` en la captura
+    de contables. Solo se falla cuando se lee un valor y discrepa.
+    """
+    esperado = _fecha_con_barras(digitos)
+
+    for intento in (1, 2):
+        # Ocho retrocesos y luego los ocho digitos.
+        #
+        # Los retrocesos borran hacia atras y arrastran el cursor con ellos,
+        # asi que ocho -- las posiciones de digito de la mascara -- lo dejan
+        # en la primera, caiga el clic donde caiga. Es lo unico que asegura
+        # que lo que se escriba empiece por el principio.
+        #
+        # Las tres alternativas ya se probaron y ninguna sirve en este
+        # control:
+        #   - `double_click()`: selecciona SOLO una parte del campo, asi que
+        #     los digitos entran por un punto medio.
+        #   - `{Ctrl}a`: un TMaskEdit de Delphi no lo procesa.
+        #   - `{Home}`: la mascara se come el `0` inicial del mes. Medido el
+        #     01/09/2026 -- pidiendo 20/07/2026 el campo quedaba en
+        #     "20/ 7/2026", dos intentos seguidos.
+        campo.click()
+        campo.send_keys(BORRAR_CAMPO_FECHA, interval=0.01, wait_time=wait_time)
+        campo.send_keys(digitos, interval=0.01, wait_time=wait_time,
+                        send_enter=True)
+
+        try:
+            leido = campo.get_value()
+        except Exception as e:  # noqa: BLE001 - leer no debe tumbar la tarea
+            log_warn(arqueo_logger, 'DUP-CHECK',
+                     f'{etiqueta}: no se pudo leer el campo ({e}); se acepta')
+            return
+
+        coincide = _misma_fecha(leido, digitos)
+
+        if coincide:
+            return
+
+        if coincide is None:
+            log_warn(arqueo_logger, 'DUP-CHECK',
+                     f'{etiqueta}: no se pudo interpretar "{leido}" tras '
+                     f'escribir {esperado}; se acepta y sigue')
+            return
+
+        log_warn(arqueo_logger, 'DUP-CHECK',
+                 f'{etiqueta}: quedo "{leido}" y se pedia "{esperado}" '
+                 f'(intento {intento})')
+
+    raise ValueError(
+        f'{etiqueta}: no se pudo escribir {esperado} en el campo de fecha')
+
+
+# =============================================================================
+# CICLO DE VIDA DE ConOpera / FilOpera
+# =============================================================================
+#
+# `arqueos_robot` reutilizaba la ConOpera que encontrara abierta
+# ('Consulta window already open, reusing') y no cerraba nada al fallar, asi
+# que una tarea heredaba la ventana de la anterior: sus campos con la fecha
+# vieja, y a veces un modal de Error encima. Con el modal, todos los
+# `path:"2|N"` se desplazan a `3|N` y la busqueda siguiente agota 10 s.
+#
+# `gastos_robot` no tiene el problema porque abre ConOpera SIEMPRE desde el
+# menu (`_setup_consulta_window` llama a `open_menu_option` sin condicion) y
+# la cierra al terminar. Se adopta lo mismo, mas un `finally` para que un
+# fallo tampoco deje nada abierto: sin el, un fallo envenena a la siguiente y
+# la cadena no se corta sola.
+
+
+def _despachar_modales(ventana, intentos: int = 3) -> int:
+    """Cierra los modales que haya encima de `ventana`. Devuelve cuantos.
+
+    Se registra el texto porque es lo unico que dice POR QUE SICAL rechazo
+    algo; sin esto el fallo llega como un `path` inexistente y no hay forma de
+    saber que paso.
+    """
+    cerrados = 0
+    for _ in range(intentos):
+        modal = ventana.find('class:"TMessageForm"', timeout=0.3,
+                             raise_error=False)
+        if not modal:
+            break
+
+        texto = ''
+        try:
+            for hijo in modal.iter_children(max_depth=3):
+                nombre = (hijo.name or '').strip()
+                if nombre and nombre not in ('OK', 'Cerrar', 'Yes', 'No'):
+                    texto = nombre
+                    break
+        except Exception:  # noqa: BLE001 - leer el texto no debe tumbar nada
+            pass
+
+        boton = (modal.find('class:"TButton" and name:"OK"', timeout=0.3,
+                            raise_error=False)
+                 or modal.find('class:"TButton"', timeout=0.3,
+                               raise_error=False))
+        if not boton:
+            break
+
+        log_warn(arqueo_logger, 'DUP-CHECK',
+                 'modal de SICAL descartado: ' + (texto or '(sin texto)'))
+        try:
+            boton.click()
+        except Exception:  # noqa: BLE001
+            break
+        cerrados += 1
+        time.sleep(0.2)
+
+    return cerrados
+
+
+def _cerrar_ventana_sical(patron: str, etiqueta: str) -> bool:
+    """Cierra la ventana si esta abierta y COMPRUEBA que se fue.
+
+    Comprobarlo importa: el localizador `name:"Cerrar"` es ambiguo -- con un
+    modal encima hay dos, el de la barra de titulo del modal (primero en orden
+    de arbol) y el de la ventana --, asi que un click puede cerrar el modal y
+    dejar la ventana abierta creyendo que se cerro.
+    """
+    ventana = wait_for_window(patron, timeout=0.5)
+    if not ventana:
+        return True
+
+    _despachar_modales(ventana)
+
+    for locator in ('class:"TBitBtn" and name:"Salir"', 'name:"Cerrar"'):
+        try:
+            boton = ventana.find(locator, search_depth=8, timeout=0.5,
+                                 raise_error=False)
+        except Exception:  # noqa: BLE001
+            boton = None
+        if not boton:
+            continue
+
+        try:
+            boton.click()
+        except Exception:  # noqa: BLE001
+            continue
+
+        # SICAL puede pedir confirmacion al salir.
+        try:
+            conf = ventana.find('class:"TButton" and name:"No"', timeout=0.5,
+                                raise_error=False)
+            if conf:
+                conf.click()
+        except Exception:  # noqa: BLE001
+            pass
+
+        if wait_for_window(patron, timeout=1.5) is None:
+            return True
+
+    log_warn(arqueo_logger, 'DUP-CHECK',
+             'no se pudo cerrar la ventana ' + etiqueta)
+    return False
+
+
+def _dejar_sical_sin_ventanas_de_consulta() -> None:
+    """Cierra FilOpera y ConOpera, en ese orden (la hija primero)."""
+    _cerrar_ventana_sical(SICAL_WINDOWS['filtros'], 'Filtros')
+    _cerrar_ventana_sical(SICAL_WINDOWS['consulta'], 'Consulta')
+
+
 def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult,
                           original_data: Optional[Dict[str, Any]] = None) -> OperationResult:
     """
@@ -361,34 +615,33 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult,
     notify_step('Checking for duplicate operations')
 
     try:
-        # Setup consulta window (retry once if it does not appear in time).
-        # First check if the window is already open from a prior attempt to
-        # avoid invoking the menu option twice (which would open a duplicate).
-        ventana_consulta = wait_for_window(SICAL_WINDOWS['consulta'], timeout=1.5)
+        # Punto de partida CONOCIDO: se cierra lo que haya quedado de una
+        # tarea anterior en vez de reutilizarlo. Cual localizador resuelve no
+        # dice en que estado esta la ventana.
+        _dejar_sical_sin_ventanas_de_consulta()
 
-        if ventana_consulta:
-            log_phase(arqueo_logger, 'DUP-CHECK', 'Consulta window already open, reusing')
-        else:
-            for attempt in (1, 2):
-                if not abrir_ventana_opcion_en_menu(SICAL_MENU_PATHS.get('consulta', None)):
-                    if attempt == 2:
-                        result.status = OperationStatus.FAILED
-                        result.error = 'Failed to open Consulta window'
-                        return result
-                    time.sleep(1.0)
-                    continue
+        # Y se abre siempre desde el menu, como hace `gastos_robot`.
+        ventana_consulta = None
+        for attempt in (1, 2):
+            if not abrir_ventana_opcion_en_menu(SICAL_MENU_PATHS.get('consulta', None)):
+                if attempt == 2:
+                    result.status = OperationStatus.FAILED
+                    result.error = 'Failed to open Consulta window'
+                    return result
+                time.sleep(1.0)
+                continue
 
-                ventana_consulta = wait_for_window(SICAL_WINDOWS['consulta'], timeout=15.0)
-                if ventana_consulta:
-                    break
+            ventana_consulta = wait_for_window(SICAL_WINDOWS['consulta'], timeout=15.0)
+            if ventana_consulta:
+                break
 
-                log_warn(arqueo_logger, 'DUP-CHECK',
-                         f'Consulta window not found on attempt {attempt}, retrying...')
+            log_warn(arqueo_logger, 'DUP-CHECK',
+                     f'Consulta window not found on attempt {attempt}, retrying...')
 
-            if not ventana_consulta:
-                result.status = OperationStatus.FAILED
-                result.error = 'Consulta window not found after retry'
-                return result
+        if not ventana_consulta:
+            result.status = OperationStatus.FAILED
+            result.error = 'Consulta window not found after retry'
+            return result
 
         # Open filters window
         filtros_btton = ventana_consulta.find(CONSULTA_FORM_PATHS['filtros_button'],timeout=2.0, raise_error=False)
@@ -420,15 +673,21 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult,
         tercero_field.double_click()
         tercero_field.send_keys(datos_arqueo['tercero'], interval=interval, wait_time=wait_time, send_enter=True)
 
-        # Date range (same date for from and to)
-        fecha = datos_arqueo['fecha']
-        from_date_field = filtros_window.find(FILTROS_FORM_PATHS['fecha_desde'])
-        from_date_field.double_click()
-        from_date_field.send_keys(fecha, interval=0.01, wait_time=wait_time, send_enter=True)
+        # Date range (same date for from and to).
+        # Se ensancha primero el tope superior y se estrecha al final: ver el
+        # bloque de comentarios sobre los campos de fecha, arriba. FilOpera
+        # puede llegar reutilizada con la fecha de la tarea anterior, y
+        # escribir un `desde` posterior al `hasta` que hay levanta un modal de
+        # Error que desplaza todos los localizadores `2|N`.
+        fecha = _fecha_solo_digitos(datos_arqueo['fecha'], 'fecha del arqueo')
 
+        from_date_field = filtros_window.find(FILTROS_FORM_PATHS['fecha_desde'])
         to_date_field = filtros_window.find(FILTROS_FORM_PATHS['fecha_hasta'])
-        to_date_field.double_click()
-        to_date_field.send_keys(fecha, interval=0.01, wait_time=wait_time, send_enter=True)
+
+        _escribir_fecha(to_date_field, FECHA_TOPE_SUPERIOR,
+                        'tope provisional', wait_time)
+        _escribir_fecha(from_date_field, fecha, 'fecha desde', wait_time)
+        _escribir_fecha(to_date_field, fecha, 'fecha hasta', wait_time)
 
         # Caja
         caja_field = filtros_window.find(FILTROS_FORM_PATHS['caja'])
@@ -511,18 +770,8 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult,
             result.status = OperationStatus.P_DUPLICATED
             result.error = f'Possible duplicate operation found, similar records: {result.similiar_records_encountered}'
 
-            # Close filters window
-            try:
-                filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
-            except:
-                pass
-
-            # Close consulta window
-            try:
-                ventana_consulta.find(CONSULTA_FORM_PATHS['salir_button']).click()
-            except:
-                pass
-
+            # Las ventanas las cierra el `finally`, para que el camino de
+            # fallo y el de exito no puedan divergir.
             log_warn(arqueo_logger, 'DUP-CHECK', f'aborting (possible duplicate): {result.error}')
 
         else:
@@ -530,17 +779,8 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult,
             result.similiar_records_encountered = 0
             log_ok(arqueo_logger, 'DUP-CHECK', 'no similar records - proceeding')
 
-            # Close error dialog
-            filtros_window.find(COMMON_DIALOG_PATHS['ok_button']).click()
-            time.sleep(0.2)
-
-            # Close filters window
-            filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
-            time.sleep(0.2)
-
-            # Close consulta window
-            ventana_consulta.find(CONSULTA_FORM_PATHS['salir_button']).click()
-            time.sleep(0.2)
+            # El modal de "sin registros" y las dos ventanas los cierra el
+            # `finally`.
 
     except windows.ElementNotFound as e:
         log_fail(arqueo_logger, 'DUP-CHECK', f'SICAL element not found: {e}')
@@ -550,6 +790,13 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult,
         log_fail(arqueo_logger, 'DUP-CHECK', str(e))
         result.status = OperationStatus.FAILED
         result.error = f'Duplicate check error: {str(e)}'
+    finally:
+        # Pase lo que pase. Un fallo que deja el modal y FilOpera abiertos
+        # envenena a la tarea siguiente, y la cadena no se corta sola.
+        try:
+            _dejar_sical_sin_ventanas_de_consulta()
+        except Exception as e:  # noqa: BLE001 - limpiar no cambia el resultado
+            log_warn(arqueo_logger, 'DUP-CHECK', 'limpieza de ventanas: ' + str(e))
 
     return result
 
