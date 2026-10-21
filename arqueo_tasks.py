@@ -506,7 +506,7 @@ def _despachar_modales(ventana, intentos: int = 3) -> int:
     """
     cerrados = 0
     for _ in range(intentos):
-        modal = ventana.find('class:"TMessageForm"', timeout=0.3,
+        modal = ventana.find('class:"TMessageForm"', timeout=0,
                              raise_error=False)
         if not modal:
             break
@@ -540,7 +540,42 @@ def _despachar_modales(ventana, intentos: int = 3) -> int:
     return cerrados
 
 
-def _cerrar_ventana_sical(patron: str, etiqueta: str) -> bool:
+def _ventana_abierta(patron: str):
+    """La ventana si esta abierta AHORA, sin esperar; si no, None.
+
+    `wait_for_window` sirve para esperar a que una ventana aparezca: usada para
+    comprobar que NO esta, agota su plazo entero cada vez (medido: 1,6 s para
+    comprobar dos ventanas que no estaban).
+    """
+    try:
+        vs = windows.find_windows(patron, timeout=0)
+    except Exception:  # noqa: BLE001
+        return None
+    return vs[0] if vs else None
+
+
+def _esperar_cierre(ventana, patron: str, timeout: float) -> bool:
+    """Espera a que la ventana desaparezca, contestando No si SICAL pregunta.
+
+    Vuelve en cuanto la ventana se va, en vez de agotar un plazo fijo.
+    """
+    fin = time.monotonic() + timeout
+    while True:
+        if not _ventana_abierta(patron):
+            return True
+        try:
+            conf = ventana.find('class:"TButton" and name:"No"', timeout=0,
+                                raise_error=False)
+            if conf:
+                conf.click()
+        except Exception:  # noqa: BLE001 - la ventana puede irse a mitad
+            pass
+        if time.monotonic() >= fin:
+            return False
+        time.sleep(0.1)
+
+
+def _cerrar_ventana_sical(patron: str, etiqueta: str, fase: str = 'DUP-CHECK') -> bool:
     """Cierra la ventana si esta abierta y COMPRUEBA que se fue.
 
     Comprobarlo importa: el localizador `name:"Cerrar"` es ambiguo -- con un
@@ -548,7 +583,7 @@ def _cerrar_ventana_sical(patron: str, etiqueta: str) -> bool:
     de arbol) y el de la ventana --, asi que un click puede cerrar el modal y
     dejar la ventana abierta creyendo que se cerro.
     """
-    ventana = wait_for_window(patron, timeout=0.5)
+    ventana = _ventana_abierta(patron)
     if not ventana:
         return True
 
@@ -568,19 +603,10 @@ def _cerrar_ventana_sical(patron: str, etiqueta: str) -> bool:
         except Exception:  # noqa: BLE001
             continue
 
-        # SICAL puede pedir confirmacion al salir.
-        try:
-            conf = ventana.find('class:"TButton" and name:"No"', timeout=0.5,
-                                raise_error=False)
-            if conf:
-                conf.click()
-        except Exception:  # noqa: BLE001
-            pass
-
-        if wait_for_window(patron, timeout=1.5) is None:
+        if _esperar_cierre(ventana, patron, timeout=3.0):
             return True
 
-    log_warn(arqueo_logger, 'DUP-CHECK',
+    log_warn(arqueo_logger, fase,
              'no se pudo cerrar la ventana ' + etiqueta)
     return False
 
@@ -623,7 +649,8 @@ def _check_for_duplicates(datos_arqueo: Dict[str, Any], result: OperationResult,
         # Y se abre siempre desde el menu, como hace `gastos_robot`.
         ventana_consulta = None
         for attempt in (1, 2):
-            if not abrir_ventana_opcion_en_menu(SICAL_MENU_PATHS.get('consulta', None)):
+            if not abrir_ventana_opcion_en_menu(SICAL_MENU_PATHS['consulta'],
+                                                rapido=attempt == 1):
                 if attempt == 2:
                     result.status = OperationStatus.FAILED
                     result.error = 'Failed to open Consulta window'
@@ -900,6 +927,11 @@ def operacion_arqueo(operation_data: Dict[str, Any],
         result = process_arqueo_operation(window_manager.ventana_arqueo, datos_arqueo,
                                           result, task_id, doc_mode=doc_mode)
 
+        # Sin _FIN o con fallo la ventana se deja abierta para revisarla a mano.
+        if result.status == OperationStatus.COMPLETED and finalizar_operacion:
+            if _cerrar_ventana_sical(SICAL_WINDOWS['arqueo'], 'Arqueo', fase='CLOSE'):
+                log_ok(arqueo_logger, 'CLOSE', 'arqueo window closed')
+
 
 
     except Exception as e:
@@ -1033,14 +1065,14 @@ def setup_sical_window(window_manager: SicalWindowManager) -> bool:
 
     # Reuse the window if it is already open (avoids opening a duplicate
     # session via the menu).
-    ventana = window_manager.find_arqueo_window(timeout=0.5)
+    ventana = _ventana_abierta(SICAL_WINDOWS['arqueo'])
     if ventana:
         log_phase(arqueo_logger, 'SETUP', 'Arqueo (mtec40) window already open, reusing')
         window_manager.ventana_arqueo = ventana
         return True
 
     for attempt in (1, 2):
-        if not abrir_ventana_opcion_en_menu(rama_arqueo):
+        if not abrir_ventana_opcion_en_menu(rama_arqueo, rapido=attempt == 1):
             if attempt == 2:
                 return False
             time.sleep(1.0)
@@ -1074,7 +1106,7 @@ def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
         # Phase 1: Initialize form and fill data
         # Note: Duplicate check is now performed in operacion_arqueo() before opening this window
         log_phase(arqueo_logger, 'FILL', f'writing main panel + {len(datos_arqueo.get("aplicaciones", []))} aplicacion line(s)')
-        ventana_arqueo.find('path:"2|4"').click()  # New button
+        ventana_arqueo.find('class:"TBitBtn" and name:"Nuevo"').click()  # New button
         ventana_arqueo.find('class:"TButton" and path:"1|2"').click()  # Confirm
 
         fill_main_panel_data(ventana_arqueo, datos_arqueo, result)
@@ -1122,15 +1154,39 @@ def process_arqueo_operation(ventana_arqueo, datos_arqueo: Dict[str, Any],
 
     return result
 
-def abrir_ventana_opcion_en_menu(menu_a_buscar):
-    '''Selecciona la opción de menu elegida, desplegando cada elemento de
-    la rama correspondiente definida mediante una tupla y haciendo doble click 
-    en el último de la tupla, que correspondería dicha opción'''
+# Ramas que este robot deja desplegadas a la vez. Medido el 21/10/2026 con
+# las dos abiertas: las dos hojas caben en la parte visible del arbol (la de
+# Consulta, a ~20 px del borde inferior), asi que cada tarea puede ir directa
+# a su hoja. Desplegar solo la propia haria que Consulta y Arqueo se plegaran
+# la una a la otra y nunca hubiera atajo.
+RAMAS_DEL_ROBOT = ('consulta', 'arqueo')
 
-    rama_ado = ('GASTOS', 'OPERACIONES DE PRESUPUESTO CORRIENTE')
-    rama_arqueo = ('TESORERIA', 'GESTION DE COBROS', 'ARQUEOS. APLICACION DIRECTA', 
-                   'TRATAMIENTO INDIVIDUALIZADO/RESUMEN')
-    rama_tesoreria_pagos = ('TESORERIA', 'GESTION DE PAGOS', 'PROCESO DE ORDENACION Y PAGO')
+
+def _hoja_a_la_vista(app, nombre: str):
+    """El item del arbol si esta dentro de la parte visible; si no, None.
+
+    Un item desplegado pero fuera de la zona visible se encuentra igual, y el
+    doble clic falla o cae en otro sitio: por eso se mira el rectangulo.
+    """
+    hoja = app.find(f'control:"TreeItemControl" and name:"{nombre}"',
+                    timeout=0, raise_error=False)
+    if not hoja:
+        return None
+    arbol = app.find('control:"TreeControl"', timeout=0, raise_error=False)
+    if not arbol:
+        return None
+    _, top, _, bottom = hoja.rectangle
+    _, a_top, _, a_bottom = arbol.rectangle
+    return hoja if a_top <= top and bottom <= a_bottom else None
+
+
+def abrir_ventana_opcion_en_menu(menu_a_buscar, rapido: bool = True):
+    '''Abre la opcion de menu `menu_a_buscar` (tupla rama..., hoja).
+
+    Con `rapido`, si la hoja ya esta a la vista se abre con un doble clic sin
+    tocar el resto del arbol (medido: ~5 s menos por apertura). Si no, se
+    pliega todo y se despliegan las ramas de RAMAS_DEL_ROBOT, para que la
+    siguiente apertura si encuentre su hoja a la vista.'''
 
     app = windows.find_window('regex:.*FMenuSical', raise_error=False, timeout=10.0)
     if not app:
@@ -1138,16 +1194,28 @@ def abrir_ventana_opcion_en_menu(menu_a_buscar):
         return False
 
     if not menu_a_buscar:
-        menu_a_buscar = rama_arqueo
+        menu_a_buscar = SICAL_MENU_PATHS['arqueo']
+
+    app.foreground_window()
+    hoja = menu_a_buscar[-1]
+
+    if rapido:
+        item = _hoja_a_la_vista(app, hoja)
+        if item:
+            item.double_click()
+            return True
 
     retraer_todos_elementos_del_menu()
-    
-    for element in menu_a_buscar[:-1]:
-        element = app.find(f'control:"TreeItemControl" and name:"{element}"', timeout=0.05)
-        element.send_keys(keys='{ADD}', wait_time=0.01)
 
-    last_element = menu_a_buscar[-1]
-    app.find(f'control:"TreeItemControl" and name:"{last_element}"').double_click()
+    rutas = [SICAL_MENU_PATHS[r] for r in RAMAS_DEL_ROBOT]
+    if menu_a_buscar not in rutas:
+        rutas.append(menu_a_buscar)
+    for ruta in rutas:
+        for element in ruta[:-1]:
+            element = app.find(f'control:"TreeItemControl" and name:"{element}"', timeout=0.05)
+            element.send_keys(keys='{ADD}', wait_time=0.01)
+
+    app.find(f'control:"TreeItemControl" and name:"{hoja}"').double_click()
     return True
 
 @task
@@ -1183,6 +1251,39 @@ def retraer_todos_elementos_del_menu():
                 arqueo_logger.warning(f"Error uninitializing COM: {e}")
 
 
+# Desde la actualizacion de SICAL el orden UIA del panel principal cambia al
+# editar campos (un TDBEdit salta a la posicion 1 y corre los demas), asi que
+# los path posicionales de ese panel no son fiables: se localiza por clase y,
+# para los TDBEdit, por columna y fila en pantalla.
+_DBEDITS_PANEL = {
+    'caja': ('izq', 0),
+    'tercero': ('izq', 1),
+    'pagos_justificar': ('der', 0),
+    'expediente': ('der', 1),
+}
+
+
+def _dbedit_panel(ventana_arqueo, campo: str):
+    columna, fila = _DBEDITS_PANEL[campo]
+    edits = ventana_arqueo.find_many('class:"TDBEdit"', search_strategy="all")
+    xs = [e.rectangle[0] for e in edits]
+    if not xs:
+        raise RuntimeError('no hay TDBEdit en la ventana de arqueo')
+    corte = (min(xs) + max(xs)) / 2
+    izq = sorted((e for e in edits if e.rectangle[0] < corte), key=lambda e: e.rectangle[1])
+    der = sorted((e for e in edits if e.rectangle[0] >= corte), key=lambda e: e.rectangle[1])
+    if len(izq) != 2 or len(der) != 2:
+        raise RuntimeError(
+            f'disposicion de TDBEdit inesperada ({len(izq)} izq / {len(der)} der): '
+            'puede haber un dialogo abierto o SICAL ha cambiado la pantalla')
+    return (izq if columna == 'izq' else der)[fila]
+
+
+def _campo_num_orden(ventana_arqueo):
+    edits = ventana_arqueo.find_many('class:"TEdit"', search_strategy="all")
+    return min(edits, key=lambda e: e.rectangle[1])
+
+
 def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: OperationResult) -> OperationResult:
     """Fill the main panel data in SICAL form"""
     # Implementation of filling main panel data
@@ -1190,38 +1291,38 @@ def fill_main_panel_data(ventana_arqueo, datos_arqueo: Dict[str, Any], result: O
     try:
         default_wait_time = 0.02
         ## HACER CLICK EN BOTON NUEVO PARA INICIALIZAR EL FORMULARIO
-        boton_nuevo = ventana_arqueo.find('path:"2|4"')
+        boton_nuevo = ventana_arqueo.find('class:"TBitBtn" and name:"Nuevo"')
         boton_nuevo.click()
         boton_confirm = ventana_arqueo.find('class:"TButton" and path:"1|2"')
         boton_confirm.click()
 
         ## INTRODUCIR DATOS PANEL PRINCIPAL
-        fecha_element = ventana_arqueo.find('path:"3|4|10"').double_click()
+        fecha_element = ventana_arqueo.find('class:"TDBDateEdit"').double_click()
         fecha_element.send_keys(
             datos_arqueo["fecha"], interval=0.05, wait_time=default_wait_time
         )
 
-        caja_element = ventana_arqueo.find('path:"3|4|8"')
+        caja_element = _dbedit_panel(ventana_arqueo, 'caja')
         caja_element.send_keys(datos_arqueo["caja"], wait_time=default_wait_time)
 
-        expediente_element = ventana_arqueo.find('path:"3|4|6"').double_click()
+        expediente_element = _dbedit_panel(ventana_arqueo, 'expediente').double_click()
         expediente_element.send_keys(
             datos_arqueo["expediente"], wait_time=default_wait_time
         )
 
-        tercero_element = ventana_arqueo.find('path:"3|4|9"').double_click()
+        tercero_element = _dbedit_panel(ventana_arqueo, 'tercero').double_click()
         tercero_element.send_keys(datos_arqueo["tercero"], wait_time=default_wait_time)
 
-        naturaleza_element = ventana_arqueo.find('path:"3|4|5"').click(wait_time=default_wait_time)
+        naturaleza_element = ventana_arqueo.find('class:"TComboBox"').click(wait_time=default_wait_time)
         naturaleza_element.send_keys(
             datos_arqueo.get('naturaleza', '4'), wait_time=default_wait_time)
-        
+
         naturaleza_element.send_keys(keys="{Enter}", wait_time=default_wait_time)
 
-        
-        
+
+
         time.sleep(0.05)
-        descripcion_element = ventana_arqueo.find('path:"3|4|7"').double_click()
+        descripcion_element = ventana_arqueo.find('class:"TDBMemo"').double_click()
         descripcion_element.send_keys(keys="{Ctrl}{A}", wait_time=default_wait_time)
         descripcion_element.send_keys(datos_arqueo["resumen"], wait_time=default_wait_time)
         descripcion_element.send_keys(keys="{Enter}", wait_time=default_wait_time)
@@ -1392,11 +1493,20 @@ def process_aplicaciones(ventana_arqueo, aplicaciones: list,
 def validate_operation(ventana_arqueo, result: OperationResult) -> OperationResult:
     """Validate the operation in SICAL"""
     try:
-        ventana_arqueo.find('name:"Validar" and path:"2|7"').click()
+        ventana_arqueo.find('class:"TBitBtn" and name:"Validar"').click()
         ventana_arqueo.find('class:"TButton" and name:"Yes" and path:"1|2"').click()
         ventana_arqueo.find('class:"TButton" and name:"OK" and path:"1|1"').click()
-        
-        num_operacion = ventana_arqueo.find('class:"TEdit" and path:"3|4|14"').get_value()
+
+        # Desde la actualizacion de SICAL, tras validar pregunta
+        # "Desea Adjuntar Documentacion a la Operacion?"; los documentos van
+        # por otro camino, asi que se contesta No.
+        dialogo_adjuntar = ventana_arqueo.find(
+            'class:"TMessageForm" and name:"Confirm"', timeout=5, raise_error=False)
+        if dialogo_adjuntar:
+            dialogo_adjuntar.find('class:"TButton" and name:"No"').click()
+            log_detail(arqueo_logger, 'VALIDATE', 'dialogo adjuntar documentacion -> No')
+
+        num_operacion = _campo_num_orden(ventana_arqueo).get_value()
         result.num_operacion = num_operacion
         run_trace.event('validated', num_operacion=num_operacion)
         log_ok(arqueo_logger, 'VALIDATE', f'operation validated -> num_operacion={num_operacion}')

@@ -329,5 +329,6 @@ def test_cerrar_una_ventana_comprueba_que_se_fue():
     justo como se quedaba abierta."""
     fuente = inspect.getsource(arqueo_tasks._cerrar_ventana_sical)
 
-    assert 'wait_for_window' in fuente
+    assert '_esperar_cierre' in fuente
+    assert '_ventana_abierta' in inspect.getsource(arqueo_tasks._esperar_cierre)
     assert 'TBitBtn' in fuente, 'debe intentar primero el boton real de la ventana'
