@@ -37,3 +37,5 @@ build/
 #history
 *.db 
 
+# Rastro de ejecucion (run_trace)
+logs/

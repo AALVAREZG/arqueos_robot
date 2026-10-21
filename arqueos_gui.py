@@ -55,6 +55,10 @@ class ArqueosGUI:
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
+        # El servicio arranca solo; con `after` para que la ventana ya este
+        # pintada cuando empiecen a llegar los mensajes de conexion.
+        self.root.after(500, self.start_service)
+
     def setup_logging(self):
         """Route the GUI Activity Log through the centralized, phase-oriented
         logging. The GUI shows only the clean INFO phase stream (no DEBUG

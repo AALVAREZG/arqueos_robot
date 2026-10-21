@@ -11,17 +11,29 @@ a = Analysis(
         'pika',
         'dotenv',
         'tenacity',
-        'rpaframework',
+        # `rpaframework` es el nombre del paquete en PyPI; el modulo que se
+        # importa es `RPA`. Pedirlo por el nombre de PyPI hacia que cada
+        # compilacion imprimiera tres ERROR de import inexistente -junto a
+        # robocorp.browser y robocorp.truststore, que no estan instalados-, y
+        # una compilacion que siempre da errores ensena a ignorarlos.
+        'RPA',
+        'RPA.Windows',
         'robocorp',
-        'robocorp.browser',
         'robocorp.windows',
-        'robocorp.truststore',
         'tkinter',
         'tkinter.ttk',
         'tkinter.scrolledtext',
         'tkinter.filedialog',
         'tkinter.messagebox',
         'sqlite3',
+        # Modulos del proyecto que entran por import directo. Se listan
+        # explicitamente igual que en gastos_robot.spec: el analisis estatico
+        # los encuentra, pero la lista es la que documenta que existen.
+        'document_mode',
+        'gui_log_filter',
+        'run_trace',
+        'rabbit_heartbeat',
+        'logging_setup',
         'json',
         'threading',
         'logging',

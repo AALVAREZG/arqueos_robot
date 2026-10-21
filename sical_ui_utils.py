@@ -10,8 +10,8 @@ from robocorp import windows
 
 
 def wait_for_window(locator: str, timeout: float = 15.0,
-                    poll_interval: float = 0.5,
-                    per_call_timeout: float = 0.5):
+                    poll_interval: float = 0.2,
+                    per_call_timeout: float = 0.2):
     """Poll ``windows.find_window`` until it returns a window or the deadline
     expires.
 

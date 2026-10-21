@@ -39,11 +39,17 @@ def _as_bool(value, default=False):
     return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
 
 
-# Rollout guard. ACTIVATED: the consumer captures the contable PDF and
-# returns it instead of the legacy in-app print. Must stay ON in tandem
-# with sical-robot's contableAssemblyEnabled (both ON together), otherwise
-# the document is captured but never printed/staged. Set the env var
-# CONTABLE_CAPTURE_ENABLED=false to roll back without a code change.
+# RESERVA, ya no interruptor.
+#
+# La decision de que hacer con el documento la toma ahora el productor y viaja
+# en el mensaje, en `parameters.document_mode` (ver document_mode.py y la spec
+# `sical-robot/docs/document-robot-split-spec.md`, §4). Este valor solo se
+# consulta cuando el mensaje NO trae el campo -consumidor nuevo contra
+# productor viejo-, que es lo que permite desplegar el productor primero.
+#
+# Se retira cuando los tres consumidores entiendan el campo. Mientras tanto
+# conserva su significado antiguo: ON = capturar y devolver, OFF = imprimir en
+# SICAL. Sigue en ON porque asi estaba, no porque decida nada nuevo.
 CONTABLE_CAPTURE_ENABLED = _as_bool(
     os.getenv('CONTABLE_CAPTURE_ENABLED', 'true'), True)
 
@@ -58,3 +64,16 @@ SICAL_PDF_WORKDIR = os.getenv(
 # consumer reports a capture failure (no storage backend on the consumer in
 # Phase A'); a Talon de Cargo is far below this.
 MAX_INLINE_BYTES = int(os.getenv('MAX_INLINE_BYTES', 2 * 1024 * 1024))
+
+
+# ---------------------------------------------------------------------------
+# Duplicate confirmation tokens (see sical_security.py)
+# ---------------------------------------------------------------------------
+
+# How long a confirmation token issued on P_DUPLICATED stays valid. The operator
+# has to notice the flagged task in sical-robot's Task Monitor and press
+# "Confirm duplicate" within this window, so it is deliberately longer than the
+# 300s used by gastos_robot. Tokens are held in memory: restarting the consumer
+# invalidates them regardless of this setting.
+DUPLICATE_TOKEN_LIFETIME_SECONDS = int(
+    os.getenv('DUPLICATE_TOKEN_LIFETIME_SECONDS', 3600))
